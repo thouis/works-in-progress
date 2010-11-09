@@ -8,12 +8,14 @@ import pylab
 import Image
 from cpmath.outline import outline
 from cpmath.filter import median_filter
+from cpmath.smooth import smooth_with_noise
 
     
     
 def wMADthresh(im):
     # Flatten the image, and sort it
-    vals = np.sort(im.copy().flatten())
+    vals = np.sort(im.copy().flatten())[::20]
+    print vals.size
     # Every value is a potential threshold.
     # Get an index to each value.
     idx = np.arange(vals.size, dtype=np.int)
@@ -37,24 +39,27 @@ def wMADthresh(im):
     hi_H = idx[::-1] / 2
 
     stepsize = 2 ** int(np.log2(vals.size))
+
+    halfidx = idx / 2
+    revhalfidx = halfidx[::-1]
+    lomed2 = 2 * lo_median
+    himed2 = 2 * hi_median
     while stepsize > 0:
         # sign indicates which direction to move lo_L and hi_L
-        step = stepsize * np.sign((lo_median - vals[lo_L]) - (vals[lo_H] - lo_median)).astype(int)
+        step = stepsize * np.sign(lomed2 - vals[lo_L] - vals[lo_H])
         lo_L += step
-        np.clip(lo_L, 0, vals.size - 1 - idx / 2, lo_L)
-        lo_H = lo_L + idx / 2
+        np.clip(lo_L, 0, vals.size - 1 - halfidx, lo_L)
+        lo_H = lo_L + halfidx
 
-        step = stepsize * np.sign((hi_median - vals[hi_L]) - (vals[hi_H] - hi_median)).astype(int)
+        step = stepsize * np.sign(himed2 - vals[hi_L] - vals[hi_H])
         hi_L += step
-        np.clip(hi_L, 0, vals.size - 1 - idx[::-1] / 2, hi_L)
-        hi_H = hi_L + idx[::-1] / 2
+        np.clip(hi_L, 0, vals.size - 1 - revhalfidx, hi_L)
+        hi_H = hi_L + revhalfidx
         stepsize /= 2
 
     err = idx * (lo_median - vals[lo_L]) + idx[::-1] * (hi_median - vals[hi_L])
     loerr = (lo_median - vals[lo_L])
     loerr = loerr[2:] + loerr[:-2]
-    pylab.plot(loerr)
-    pylab.show()
     err = err[2:] + err[:-2]
     return vals[err == err.min()].mean()
     
@@ -81,10 +86,11 @@ class ImagePanel(wx.lib.scrolledpanel.ScrolledPanel):
 
     def threshold(self, thresh):
         print thresh
-        return self.im + im.max() * outline(self.im > thresh) / 10.0
+        return self.im * (1 - outline(self.im > thresh) / 2.0)
 
     def im_to_bmp(self, im):
         h, w = im.shape
+        im = im - im.min()
         im = ((im / im.max()).flatten() * 255).astype(np.uint8)
         stacked = np.dstack((im, im, im)) # gray to RGB
         image = wx.EmptyImage(w, h)
@@ -116,8 +122,10 @@ class ControlPanel(wx.Panel):
         self.SetSizer(vbox)
 
     def OnOk(self, evt):
-        thresh = wMADthresh(self.im)
-
+        thresh = wMADthresh(self.im) 
+        print thresh, self.sld.Value,
+        thresh *= 1 + (float(self.sld.Value) - 50) / 100.0
+        print thresh
         self.impanel.update(thresh)
 
     def OnClose(self, evt):
@@ -139,18 +147,12 @@ def PIL_to_numpy(img):
 
 
 im = PIL_to_numpy(Image.open(sys.argv[1]))
-im = np.log(im.astype(float))
-im -= im.min()
-im /= im.max()
-
-im -= median_filter(im, im > -1, 55)
-im -= im.min()
-im /= im.max()
-
-
-pylab.hist(im.flatten(), 100)
+im = im.astype(float) / 2**12
+pylab.hist(np.log(im.flatten()), 100)
+im = np.exp2(np.log2(im) + (np.log2(im + 2.0**-12) - np.log2(im)) * np.random.normal(size=im.shape))
+pylab.figure()
+pylab.hist(np.log(im.flatten()), 100)
 pylab.show()
-
 
 print wMADthresh(im)
 
