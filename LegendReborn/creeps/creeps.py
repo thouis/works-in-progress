@@ -1,6 +1,11 @@
 import os, sys
+import heapq
 from random import randint, choice, random
+from copy import copy
 from math import sin, cos, radians
+import numpy as np
+import scipy.ndimage as ndi
+import cPickle
 
 import pygame
 from pygame.sprite import Sprite
@@ -14,7 +19,7 @@ class Creep(Sprite):
     """
     def __init__(   
             self, screen, img_filename, init_position, 
-            init_direction, speed):
+            init_direction, speed, paths):
         """ Create a new Creep.
         
             screen: 
@@ -47,79 +52,72 @@ class Creep(Sprite):
         #
         self.base_image = pygame.image.load(img_filename).convert_alpha()
         self.image = self.base_image
+        self.image_w, self.image_h = self.image.get_size()
+
         
         # A vector specifying the creep's position on the screen
         #
-        self.pos = vec2d(init_position)
+        self.startpos = self.pos = vec2d(init_position)
+        
 
         # The direction is a normalized vector
         #
         self.direction = vec2d(init_direction).normalized()
+
+        self.paths = copy(paths)
+        self.startpaths = copy(paths)
             
-    def update(self, time_passed, path):
+    def update(self, time_passed):
         """ Update the creep.
         
             time_passed:
                 The time passed (in ms) since the previous update.
         """
-        # Maybe it's time to change the direction ?
-        #
-        self._change_direction(time_passed)
-        
-        # Make the creep point in the correct direction.
-        # Since our direction vector is in screen coordinates 
-        # (i.e. right bottom is 1, 1), and rotate() rotates 
-        # counter-clockwise, the angle must be inverted to 
-        # work correctly.
-        #
-        self.image = pygame.transform.rotate(
-            self.base_image, -self.direction.angle)
-        
-        # Compute and apply the displacement to the position 
-        # vector. The displacement is a vector, having the angle
-        # of self.direction (which is normalized to not affect
-        # the magnitude of the displacement)
-        #
-        displacement = vec2d(    
-            self.direction.x * self.speed * time_passed,
-            self.direction.y * self.speed * time_passed)
-        
-        try:
-            newpos = self.pos + displacement
-            new_color = path.get_at(newpos).hsva[2]
-        except:
-            newpos = self.pos
-            new_color = path.get_at(newpos).hsva[2]
+        # # Make the creep point in the correct direction.
+        # # Since our direction vector is in screen coordinates 
+        # # (i.e. right bottom is 1, 1), and rotate() rotates 
+        # # counter-clockwise, the angle must be inverted to 
+        # # work correctly.
+        # #
+        # self.image = pygame.transform.rotate(
+        #     self.base_image, -self.direction.angle)
+        # 
+        # # Compute and apply the displacement to the position 
+        # # vector. The displacement is a vector, having the angle
+        # # of self.direction (which is normalized to not affect
+        # # the magnitude of the displacement)
+        # #
+        # displacement = vec2d(    
+        #     self.direction.x * self.speed * time_passed,
+        #     self.direction.y * self.speed * time_passed)
 
-        old_color = path.get_at(self.pos).hsva[2]
-        if (old_color < new_color) or (old_color < 95) or (new_color > 99):
+        while time_passed > 0:
+            # are we at the end?
+            if len(self.paths) == 0:
+                self.pos = self.startpos
+                self.paths = copy(self.startpaths)
+                return
+
+            # if the creep has multiple paths to choose from, choose one
+            if len(self.paths[0]) > 1:
+                self.paths[0] = [choice(self.paths[0])]
+
+            path = self.paths[0][0]
+            old_distance = path[int(self.pos.y), int(self.pos.x)]
+            if old_distance == 0.0:
+                # move to next piece of path
+                self.paths = self.paths[1:]
+                return
+
+            new_distance = old_distance
+            assert np.isfinite(old_distance)
+            while new_distance >= old_distance:
+                newpos = self.pos + (choice([-1, 0, 1]), choice([-1, 0, 1]))
+                new_distance = path[int(newpos.y), int(newpos.x)]
+            time_passed -= (old_distance - new_distance) / self.speed
+            # print old_distance, new_distance, old_distance - new_distance, time_passed
             self.pos = newpos
-        else:
-            if old_color > 99:
-                self.direction.rotate(45 * randint(-1, 1))
-                
-        
-        # When the image is rotated, its size is changed.
-        # We must take the size into account for detecting 
-        # collisions with the walls.
-        #
-        self.image_w, self.image_h = self.image.get_size()
-        bounds_rect = self.screen.get_rect().inflate(
-                        -self.image_w, -self.image_h)
-        
-        if self.pos.x < bounds_rect.left:
-            self.pos.x = bounds_rect.left
-            self.direction.x *= -1
-        elif self.pos.x > bounds_rect.right:
-            self.pos.x = bounds_rect.right
-            self.direction.x *= -1
-        elif self.pos.y < bounds_rect.top:
-            self.pos.y = bounds_rect.top
-            self.direction.y *= -1
-        elif self.pos.y > bounds_rect.bottom:
-            self.pos.y = bounds_rect.bottom
-            self.direction.y *= -1
-    
+
     def blitme(self):
         """ Blit the creep onto the screen that was provided in
             the constructor.
@@ -143,20 +141,85 @@ class Creep(Sprite):
             0.4 to 0.5 seconds.
         """
         self._counter += time_passed
-        if self._counter > randint(400, 500):
-            self.direction.rotate(45 * randint(-1, 1))
+        if self._counter > randint(200, 300):
+            self.direction.rotate(22.5 * randint(-2, 2))
+            while (self.direction.x < 0) and (self.direction.y < 0):
+                self.direction.rotate(22.5 * randint(-2, 2))
             self._counter = 0
     
+
+def masked_distance(start, mask):
+    dist = np.inf * np.ones(start.shape)
+    mask = mask.copy()
+    mask[:, 0] = 0
+    mask[:, -1] = 0
+    mask[0, :] = 0
+    mask[-1, :]
+    start = start * mask
+    dist[start] = 1
+
+    j, i = np.meshgrid(np.arange(mask.shape[1]), np.arange(mask.shape[0]))    
+
+    heap = [(0, pi, pj) for pi, pj in zip(i[start], j[start])]
+    print len(heap), "initial"
+    while len(heap) > 0:
+        d, pi, pj = heapq.heappop(heap)
+        if d < dist[pi, pj]:
+            dist[pi, pj] = d
+            for di in range(-1, 2):
+                for dj in range(-1, 2):
+                    newd = dist[pi, pj] + np.sqrt(0.0 + di * di + dj * dj)
+                    if mask[pi + di, pj + dj] and (newd < dist[pi + di, pj + dj]):
+                        heapq.heappush(heap, (newd, pi + di, pj + dj))
+
+    return dist
+    
+
+def create_paths(pathimage):
+    # shortest path through black then purple then cyan
+    arr = np.transpose(pygame.surfarray.array3d(pathimage), [1,0,2])
+    maxval = arr.max()
+    black = (((arr == 0).sum(axis=2)) == 3)
+    print "found %d black pixels"%(black.sum())
+    purple = ((arr[:,:,0] == maxval) & (arr[:,:,1] == 0) & (arr[:,:,2] == maxval))
+    print "found %d purple pixels"%(purple.sum())
+    cyan = ((arr[:,:,0] == 0) & (arr[:,:,1] == maxval) & (arr[:,:,2] == maxval))
+    print "found %d cyan pixels"%(cyan.sum())
+    white = (((arr == arr.max()).sum(axis=2)) == 3)
+    print "found %d white pixels"%(white.sum())
+
+
+    mask = black | purple | cyan | white
+
+    black_blobs, black_count = ndi.label(black)
+    purple_blobs, purple_count = ndi.label(purple)
+    cyan_blobs, cyan_count = ndi.label(cyan)
+
+    print np.transpose(np.nonzero(black))
+
+    try:
+        black_centers, purple_distances, cyan_distances = cPickle.load(open("distances.pickle"))
+    except:
+        black_centers = ndi.center_of_mass(np.ones(black_blobs.shape), black_blobs, range(1, black_count + 1))
+        purple_distances = [masked_distance(purple_blobs == (b + 1), mask) for b in range(purple_count)]
+        cyan_distances = [masked_distance(cyan_blobs == (b + 1), mask) for b in range(cyan_count)]
+        cPickle.dump((black_centers, purple_distances, cyan_distances), open("distances.pickle", "w"))
+    
+    return black_centers, [purple_distances, cyan_distances]
 
 def run_game():
     # Game parameters
     SCREEN_WIDTH, SCREEN_HEIGHT = 400, 400
     BG_COLOR = 150, 150, 80
     CREEP_FILENAMES = [
-        'bluecreep.png', 
+        'bonehunter2.png', 
         'pinkcreep.png', 
         'graycreep.png']
-    N_CREEPS = 5
+    TOWER_FILENAMES = [
+        'matanui.png',
+        ]
+    N_CREEPS = 50
+    N_TOWERS = 10
 
     pygame.init()
 
@@ -169,6 +232,8 @@ def run_game():
     path = pygame.transform.scale(path, (int(w * sc), int(h * sc)))
     backgroundRect = background.get_rect()
 
+    starts, paths = create_paths(path)
+
     screen = pygame.display.set_mode(
         background.get_size(), 0, 32)
     clock = pygame.time.Clock()
@@ -178,11 +243,18 @@ def run_game():
     for i in range(N_CREEPS):
         creeps.append(Creep(screen,
                             choice(CREEP_FILENAMES), 
-                            (   randint(2, SCREEN_WIDTH), 
-                                randint(2, SCREEN_HEIGHT)), 
+                            (   choice(starts)[::-1]), # reversed x and y
                             (   choice([-1, 1]), 
                                 choice([-1, 1])),
-                            0.1))
+                            0.01,
+                            paths))
+
+    towers = [Creep(screen,
+                    choice(TOWER_FILENAMES),
+                    (randint(0, background.get_size()[0]), randint(0, background.get_size()[1])),
+                    (1, 1),
+                    0.0,
+                    paths) for i in range (N_TOWERS)]
 
     # The main game loop
     #
@@ -200,8 +272,11 @@ def run_game():
         
         # Update and redraw all creeps
         for creep in creeps:
-            creep.update(time_passed, path)
+            creep.update(time_passed)
             creep.blitme()
+
+        for tower in towers:
+            tower.blitme()
 
         pygame.display.flip()
 
