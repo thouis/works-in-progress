@@ -99,8 +99,12 @@ class Creep(Sprite):
                 return
 
             # if the creep has multiple paths to choose from, choose one
-            if len(self.paths[0]) > 1:
-                self.paths[0] = [choice(self.paths[0])]
+            while len(self.paths[0]) > 1:
+                p = choice(self.paths[0])
+                if np.isfinite(p[int(self.pos.y), int(self.pos.x)]):
+                    self.paths[0] = [p]
+                    break
+                
 
             path = self.paths[0][0]
             old_distance = path[int(self.pos.y), int(self.pos.x)]
@@ -195,7 +199,7 @@ def create_paths(pathimage):
     purple_blobs, purple_count = ndi.label(purple)
     cyan_blobs, cyan_count = ndi.label(cyan)
 
-    print np.transpose(np.nonzero(black))
+    print black_count, purple_count, cyan_count
 
     try:
         black_centers, purple_distances, cyan_distances = cPickle.load(open("distances.pickle"))
@@ -213,10 +217,14 @@ def run_game():
     BG_COLOR = 150, 150, 80
     CREEP_FILENAMES = [
         'bonehunter2.png', 
-        'pinkcreep.png', 
-        'graycreep.png']
+        'skorpio.png',
+        'tuma.png', 
+        'skrals.png']
     TOWER_FILENAMES = [
         'matanui.png',
+        'malum.png',
+        'gresh.png',
+        'gelu.png',
         ]
     N_CREEPS = 50
     N_TOWERS = 10
@@ -246,7 +254,7 @@ def run_game():
                             (   choice(starts)[::-1]), # reversed x and y
                             (   choice([-1, 1]), 
                                 choice([-1, 1])),
-                            0.01,
+                            0.05,
                             paths))
 
     towers = [Creep(screen,
