@@ -240,6 +240,8 @@ def run_game():
         'malum.png',
         'gresh.png',
         'gelu.png',
+        'vastus.png',
+        'kiina.png',
         ]
     N_CREEPS = 50
     N_TOWERS = 0
