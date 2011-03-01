@@ -46,12 +46,7 @@ class Creep(Sprite):
         self.screen = screen
         self.speed = speed
         
-        # base_image holds the original image, positioned to
-        # angle 0.
-        # image will be rotated.
-        #
-        self.base_image = pygame.image.load(img_filename).convert_alpha()
-        self.image = self.base_image
+        self.image = pygame.image.load(img_filename).convert_alpha()
         self.image_w, self.image_h = self.image.get_size()
 
         
@@ -66,7 +61,17 @@ class Creep(Sprite):
 
         self.paths = copy(paths)
         self.startpaths = copy(paths)
-            
+
+        draw_pos = self.image.get_rect().move(
+            self.pos.x - self.image_w / 2, 
+            self.pos.y - self.image_h / 2)
+        self.rect = draw_pos
+         
+    def change_image(self, newim):
+        self.image = pygame.image.load(newim).convert_alpha()
+        self.image_w, self.image_h = self.image.get_size()
+
+   
     def update(self, time_passed):
         """ Update the creep.
         
@@ -134,6 +139,7 @@ class Creep(Sprite):
         draw_pos = self.image.get_rect().move(
             self.pos.x - self.image_w / 2, 
             self.pos.y - self.image_h / 2)
+        self.rect = draw_pos
         self.screen.blit(self.image, draw_pos)
            
     #------------------ PRIVATE PARTS ------------------#
@@ -151,6 +157,15 @@ class Creep(Sprite):
                 self.direction.rotate(22.5 * randint(-2, 2))
             self._counter = 0
     
+
+class Button(Creep):
+    def __init__(self, *args, **kwargs):
+        Creep.__init__(self, *args, **kwargs)
+        bg = pygame.Surface(self.image.get_size())
+        bg.fill((128, 128, 128))
+        bg.blit(self.image, (0, 0))
+        self.image = bg
+        
 
 def masked_distance(start, mask):
     dist = np.inf * np.ones(start.shape)
@@ -227,7 +242,7 @@ def run_game():
         'gelu.png',
         ]
     N_CREEPS = 50
-    N_TOWERS = 10
+    N_TOWERS = 0
 
     pygame.init()
 
@@ -264,8 +279,23 @@ def run_game():
                     0.0,
                     paths) for i in range (N_TOWERS)]
 
+    buttons = [Button(screen,
+                      towerfile,
+                      (randint(0, background.get_size()[0]), randint(0, background.get_size()[1])),
+                      (1, 1),
+                      0.0,
+                      paths) for towerfile in TOWER_FILENAMES]
+
+    rightedge = screen.get_width() - 5
+    for b in buttons:
+        b.pos = vec2d(rightedge - b.image.get_width() / 2, 5 + b.image.get_height() / 2)
+        rightedge -= (b.image.get_width() + 5)
+
+    next_tower = TOWER_FILENAMES[0]
+
     # The main game loop
     #
+    rect = pygame.Rect((1, 1), (10, 10))
     while True:
         # Limit frame speed to 50 FPS
         #
@@ -274,7 +304,22 @@ def run_game():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 exit_game()
-        
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    rect.center = pygame.mouse.get_pos()
+                    collided = False
+                    for b in buttons:
+                        if b.rect.colliderect(rect):
+                            collided = True
+                            next_tower = TOWER_FILENAMES[buttons.index(b)]
+                    if not collided:
+                        towers += [Creep(screen,
+                                         next_tower,
+                                         pygame.mouse.get_pos(),
+                                         (1, 1),
+                                         0.0,
+                                         paths)]
+
         # Redraw the background
         screen.blit(background, backgroundRect)
         
@@ -283,7 +328,7 @@ def run_game():
             creep.update(time_passed)
             creep.blitme()
 
-        for tower in towers:
+        for tower in towers + buttons:
             tower.blitme()
 
         pygame.display.flip()
