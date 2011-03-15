@@ -11,6 +11,7 @@ import pygame
 import pygame.surfarray
 from pygame.sprite import Sprite
 import pygame.mixer as mixer
+import pygame.font
 
 from vec2d import vec2d
 
@@ -178,8 +179,10 @@ class Tower(Creep):
                 choice(self.firing_sounds).play()
 
     def update(self, time_passed):
+        winnings = 0
         for a in self.active_attacks:
-            a.update(time_passed)
+            winnings += a.update(time_passed)
+        return winnings
 
     def blitme(self):
         Creep.blitme(self)
@@ -201,8 +204,11 @@ class Attack(Creep):
             # play the explosion
             print self.target.explosion.play(fade_ms=50), self.target.explosion
             self.parent.active_attacks.remove(self)
+            winnings = 5
         else:
             self.pos = self.pos + (delta * (time_passed * self.speed) / delta.get_length())
+            winnings = 0
+        return winnings
             
     def blitme(self):
         pygame.draw.circle(self.parent.screen, pygame.Color(255, 255, 255), self.pos, 5)
@@ -317,6 +323,8 @@ def run_game():
     SELL_FILENAME = 'Sell.png'
     BUTTON_FILENAMES = TOWER_FILENAMES + [SELL_FILENAME]
 
+    money = 1000
+
     mixer.pre_init(44100, -16, 2, 2048) # setup mixer to avoid sound lag
     mixer.init()
     mixer.set_num_channels(30)
@@ -383,6 +391,8 @@ def run_game():
                     (1,1),
                     0.0, paths)
 
+    font = pygame.font.SysFont(pygame.font.get_default_font(), 20, bold=True)
+
     # The main game loop
     #
     rect = pygame.Rect((1, 1), (10, 10))
@@ -409,7 +419,7 @@ def run_game():
                     for t in towers:
                         if cursor.rect.colliderect(t.rect):
                             collided = t
-                    if not collided and not selling:
+                    if not collided and not selling and money > 100:
                         towers += [Tower(screen,
                                          next_tower,
                                          pygame.mouse.get_pos(),
@@ -419,9 +429,11 @@ def run_game():
                                          radius=100,
                                          max_attacks=3,
                                          firing_sounds=FIRING)]
+                        money -= 100
                     if selling and collided:
                         if collided in towers:
                             towers.remove(collided)
+                            money += 50
 
         # Redraw the background
         screen.blit(background, backgroundRect)
@@ -432,12 +444,15 @@ def run_game():
 
         for tower in towers:
             tower.attack(creeps)
-            tower.update(time_passed)
+            money += tower.update(time_passed)
 
         cursor.update()
 
         for obj in creeps + towers + buttons + [cursor]:
             obj.blitme()
+            
+        money_text = font.render("%d"%(money), True, pygame.Color(0, 0, 0))
+        screen.blit(money_text, (rightedge - 5 - money_text.get_width(), 5 + money_text.get_height()))
 
         pygame.display.flip()
 
