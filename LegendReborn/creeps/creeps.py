@@ -8,7 +8,10 @@ import scipy.ndimage as ndi
 import cPickle
 
 import pygame
+import pygame.surfarray
 from pygame.sprite import Sprite
+import pygame.mixer as mixer
+import pygame.font
 
 from vec2d import vec2d
 
@@ -19,7 +22,7 @@ class Creep(Sprite):
     """
     def __init__(   
             self, screen, img_filename, init_position, 
-            init_direction, speed, paths):
+            init_direction, speed, paths, explosion=None):
         """ Create a new Creep.
         
             screen: 
@@ -45,6 +48,7 @@ class Creep(Sprite):
         
         self.screen = screen
         self.speed = speed
+        self.explosion = explosion
         
         self.image = pygame.image.load(img_filename).convert_alpha()
         self.image_w, self.image_h = self.image.get_size()
@@ -158,6 +162,57 @@ class Creep(Sprite):
             self._counter = 0
     
 
+class Tower(Creep):
+    def __init__(self, *args, **kwargs):
+        self.radius = kwargs.pop('radius')
+        self.firing_sounds = kwargs.pop('firing_sounds')
+        self.max_attacks = kwargs.pop('max_attacks')
+        Creep.__init__(self, *args, **kwargs)
+        self.active_attacks = []
+
+    def attack(self, targets):
+        for t in set(targets) - set(a.target for a in self.active_attacks) :
+            if len(self.active_attacks) >= self.max_attacks:
+                return
+            if pygame.sprite.collide_circle(self, t):
+                self.active_attacks.append(Attack(self, t))
+                choice(self.firing_sounds).play()
+
+    def update(self, time_passed):
+        winnings = 0
+        for a in self.active_attacks:
+            winnings += a.update(time_passed)
+        return winnings
+
+    def blitme(self):
+        Creep.blitme(self)
+        for a in self.active_attacks:
+            a.blitme()
+                
+class Attack(Creep):
+    def __init__(self, parent, target):
+        self.parent = parent
+        self.pos = parent.pos
+        self.target = target
+        self.speed = 0.1
+
+    def update(self, time_passed):
+        delta = self.target.pos - self.pos
+        if delta.get_length() < time_passed * self.speed:
+            # force it back to the start
+            self.target.paths = []
+            # play the explosion
+            print self.target.explosion.play(fade_ms=50), self.target.explosion
+            self.parent.active_attacks.remove(self)
+            winnings = 5
+        else:
+            self.pos = self.pos + (delta * (time_passed * self.speed) / delta.get_length())
+            winnings = 0
+        return winnings
+            
+    def blitme(self):
+        pygame.draw.circle(self.parent.screen, pygame.Color(255, 255, 255), self.pos, 5)
+
 class Button(Creep):
     def __init__(self, *args, **kwargs):
         Creep.__init__(self, *args, **kwargs)
@@ -166,6 +221,28 @@ class Button(Creep):
         bg.blit(self.image, (0, 0))
         self.image = bg
         
+
+class Cursor(Creep):
+    def __init__(self, *args, **kwargs):
+        Creep.__init__(self, *args, **kwargs)
+        self.fix_im()
+
+    def change_image(self, *args, **kwargs):
+        Creep.change_image(self, *args, **kwargs)
+        self.fix_im()
+
+    def fix_im(self):
+        arr = pygame.surfarray.pixels_alpha(self.image)
+        arr[:,:] = (2.0 * arr) / 3
+
+    def update(self):
+        self.pos = vec2d(pygame.mouse.get_pos())
+
+    def blitme(self):
+        Creep.blitme(self)
+        pygame.draw.circle(self.screen, pygame.Color(128, 10, 10, 128), self.pos, 100, 1)
+
+
 
 def masked_distance(start, mask):
     dist = np.inf * np.ones(start.shape)
@@ -243,6 +320,17 @@ def run_game():
         'vastus.png',
         'kiina.png',
         ]
+    SELL_FILENAME = 'Sell.png'
+    BUTTON_FILENAMES = TOWER_FILENAMES + [SELL_FILENAME]
+
+    money = 1000
+
+    mixer.pre_init(44100, -16, 2, 2048) # setup mixer to avoid sound lag
+    mixer.init()
+    mixer.set_num_channels(30)
+    print "mix", mixer.get_num_channels()
+    EXPLOSIONS = [mixer.Sound('expl%d.wav'%(i)) for i in range(1, 7)]
+    FIRING = [mixer.Sound('fire%d.wav'%(i)) for i in range(1, 4)]
     N_CREEPS = 50
     N_TOWERS = 0
 
@@ -272,21 +360,24 @@ def run_game():
                             (   choice([-1, 1]), 
                                 choice([-1, 1])),
                             0.05,
-                            paths))
+                            paths,
+                            choice(EXPLOSIONS)))
 
-    towers = [Creep(screen,
+    towers = [Tower(screen,
                     choice(TOWER_FILENAMES),
                     (randint(0, background.get_size()[0]), randint(0, background.get_size()[1])),
                     (1, 1),
                     0.0,
-                    paths) for i in range (N_TOWERS)]
+                    paths, radius=100, max_attacks=3, firing_sounds=FIRING) for i in range (N_TOWERS)]
 
     buttons = [Button(screen,
-                      towerfile,
+                      buttonfile,
                       (randint(0, background.get_size()[0]), randint(0, background.get_size()[1])),
                       (1, 1),
                       0.0,
-                      paths) for towerfile in TOWER_FILENAMES]
+                      paths) for buttonfile in BUTTON_FILENAMES]
+
+
 
     rightedge = screen.get_width() - 5
     for b in buttons:
@@ -295,9 +386,17 @@ def run_game():
 
     next_tower = TOWER_FILENAMES[0]
 
+    cursor = Cursor(screen, TOWER_FILENAMES[0],
+                    (0, 0),
+                    (1,1),
+                    0.0, paths)
+
+    font = pygame.font.SysFont(pygame.font.get_default_font(), 20, bold=True)
+
     # The main game loop
     #
     rect = pygame.Rect((1, 1), (10, 10))
+    selling = False    
     while True:
         # Limit frame speed to 50 FPS
         #
@@ -312,15 +411,29 @@ def run_game():
                     collided = False
                     for b in buttons:
                         if b.rect.colliderect(rect):
+                            selling = b == buttons[-1]
+                            if not selling:
+                                next_tower = BUTTON_FILENAMES[buttons.index(b)]
+                            cursor.change_image(BUTTON_FILENAMES[buttons.index(b)])
                             collided = True
-                            next_tower = TOWER_FILENAMES[buttons.index(b)]
-                    if not collided:
-                        towers += [Creep(screen,
+                    for t in towers:
+                        if cursor.rect.colliderect(t.rect):
+                            collided = t
+                    if not collided and not selling and money > 100:
+                        towers += [Tower(screen,
                                          next_tower,
                                          pygame.mouse.get_pos(),
                                          (1, 1),
                                          0.0,
-                                         paths)]
+                                         paths,
+                                         radius=100,
+                                         max_attacks=3,
+                                         firing_sounds=FIRING)]
+                        money -= 100
+                    if selling and collided:
+                        if collided in towers:
+                            towers.remove(collided)
+                            money += 50
 
         # Redraw the background
         screen.blit(background, backgroundRect)
@@ -328,10 +441,18 @@ def run_game():
         # Update and redraw all creeps
         for creep in creeps:
             creep.update(time_passed)
-            creep.blitme()
 
-        for tower in towers + buttons:
-            tower.blitme()
+        for tower in towers:
+            tower.attack(creeps)
+            money += tower.update(time_passed)
+
+        cursor.update()
+
+        for obj in creeps + towers + buttons + [cursor]:
+            obj.blitme()
+            
+        money_text = font.render("%d"%(money), True, pygame.Color(0, 0, 0))
+        screen.blit(money_text, (rightedge - 5 - money_text.get_width(), 5 + money_text.get_height()))
 
         pygame.display.flip()
 
