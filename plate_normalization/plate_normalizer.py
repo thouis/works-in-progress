@@ -5,6 +5,7 @@ import sys
 import random
 import os.path
 import xlrd
+from welltools import extract_row, extract_col
 
 app_name = "Plate Normalizer"
 aboutText = """<p>Plate normalizer v0.1.</p>""" 
@@ -48,6 +49,7 @@ class ColumnSelector(wx.Panel):
         self.callback = callback
         self.substring_hint = substring_hint
         self.normalization = normalization
+        self.sheet_idx = 0
 
         normalization.listeners.append(self.input_file_updated)
 
@@ -69,19 +71,31 @@ class ColumnSelector(wx.Panel):
         
     def select_sheet(self, evt):
         sheet_idx = evt.GetSelection()
-        self.normalization.set_sheet(sheet_idx)
+        self.sheet_idx = sheet_idx
         self.column_selector.Clear()
         self.column_selector.AppendItems([c.value for c in self.normalization.book.sheet_by_index(sheet_idx).row(0)])
+        # XXX - set column to default
 
     def select_column(self, evt):
-        pass
+        colidx = evt.GetSelection()
+        self.callback((self.sheet_idx, colidx,
+                       self.normalization.book.sheet_names()[self.sheet_idx],
+                       self.normalization.book.sheet_by_index(self.sheet_idx).row(0)[colidx]))
 
  
 class Normalization(object):
+    '''This object communicates the parameters (including input and output files) for a normalization'''
     def __init__(self):
         self.input_file = ''
         self.output_file = ''
-        self.sheet = ''
+        self.shape = ''
+        self.plate_column = ()
+        self.well_column = ()
+        self.wellrow_column = ()
+        self.wellcol_column = ()
+        self.combined_wellrowcol = True
+        self.gene_column = ()
+
         self.listeners = []
     
     def set_input_file(self, val):
@@ -97,9 +111,32 @@ class Normalization(object):
         for f in self.listeners:
             f()
 
-    def set_sheet(self, val):
-        self.sheet = val
+    
+    def get_column_values(self, column_specifier):
+        # import pdb
+        # pdb.set_trace()
+        return [cell.value for cell in self.book.sheet_by_index(column_specifier[0]).col(column_specifier[1])[1:]]
+
+    def fetch_plates(self):
+        return self.get_column_values(self.plate_column)
+
+    def fetch_rows(self):
+        if self.combined_wellrowcol:
+            return [extract_row(v) for v in self.get_column_values(self.well_column)]
+        else:
+            return self.get_column_values(self.wellrow_column)
         
+    def fetch_cols(self):
+        if self.combined_wellrowcol:
+            return [extract_col(v) for v in self.get_column_values(self.well_column)]
+        else:
+            return self.get_column_values(self.wellcol_column)
+        
+    def fetch_genes(self):
+        return self.get_column_values(self.gene_column)
+        
+
+    
 
 class DataInputOutput(wx.Panel):
     def __init__(self, parent, normalization):
@@ -169,9 +206,9 @@ class PlateLayout(wx.Panel):
         shape_sizer.Add((1,1), 2)
 
         plate_column_box = wx.StaticBox(self, wx.ID_ANY, 'Plate column in spreadsheet')
-        plate_column_sizer = wx.StaticBoxSizer(plate_column_box, wx.HORIZONTAL)
+        plate_column_sizer = wx.StaticBoxSizer(plate_column_box, wx.VERTICAL)
         plate_column_selector = ColumnSelector(self, self.set_plate_column, 'plate', self.normalization)
-        plate_column_sizer.Add(plate_column_selector)
+        plate_column_sizer.Add(plate_column_selector, 0, wx.EXPAND)
 
         well_column_box = wx.StaticBox(self, wx.ID_ANY, 'Well column(s) in spreadsheet')
         self.well_column_sizer = wx.StaticBoxSizer(well_column_box, wx.VERTICAL)
@@ -185,6 +222,12 @@ class PlateLayout(wx.Panel):
         self.well_column_sizer.Add(self.well_selector, 0, wx.EXPAND | wx.TOP, 5)
         self.well_column_sizer.Add(self.wellrow_selector, 0, wx.EXPAND | wx.TOP, 5)
         self.well_column_sizer.Add(self.wellcol_selector, 0, wx.EXPAND | wx.TOP, 5)
+
+        gene_column_box = wx.StaticBox(self, wx.ID_ANY, 'Gene column in spreadsheet')
+        gene_column_sizer = wx.StaticBoxSizer(gene_column_box, wx.VERTICAL)
+        gene_column_selector = ColumnSelector(self, self.set_gene_column, 'gene', self.normalization)
+        gene_column_sizer.Add(gene_column_selector, 0, wx.EXPAND)
+
 
         wells_combined.Value = True
         self.well_column_sizer.Hide(self.wellrow_selector)
@@ -201,34 +244,80 @@ class PlateLayout(wx.Panel):
         sizer.Add(shape_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(plate_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(self.well_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        sizer.Add(gene_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(sizer)
     
-    def set_plate_column(self, val):
-        pass
-
-    def set_well_column(self, val):
-        pass
-    
-    def set_wellrow_column(self, val):
-        pass
-
-    def set_wellcol_column(self, val):
-        pass
-
     def set_shape(self, evt):
         self.normalization.shape = evt.EventObject.Label
+        self.preflight()
+
+    def set_plate_column(self, val):
+        self.normalization.plate_column = val
+        self.preflight()
+
+    def set_well_column(self, val):
+        self.normalization.well_column = val
+        self.preflight()
+    
+    def set_wellrow_column(self, val):
+        self.normalization.wellrow_column = val
+        self.preflight()
+
+    def set_wellcol_column(self, val):
+        self.normalization.wellcol_column = val
+        self.preflight()
 
     def set_wells_combined(self, evt):
         if evt.EventObject == self.wells_combined:
+            self.normalization.combined_wellrowcol = True
             self.well_column_sizer.Show(self.well_selector)
             self.well_column_sizer.Hide(self.wellrow_selector)
             self.well_column_sizer.Hide(self.wellcol_selector)
         else:
+            self.normalization.combined_wellrowcol = False
             self.well_column_sizer.Hide(self.well_selector)
             self.well_column_sizer.Show(self.wellrow_selector)
             self.well_column_sizer.Show(self.wellcol_selector)
+        self.preflight()
         self.topsizer.Layout()
 
+    def set_gene_column(self, val):
+        self.normalization.gene_column = val
+        self.preflight()
+
+    def preflight(self):
+        # Attempt to parse the data, report what we find
+        self.valid = False
+        try:
+            # fetch (plate, row, col, gene) for every entry in the XLS
+            # given the columns we have.
+            current_data = zip(self.normalization.fetch_plates(),
+                               self.normalization.fetch_rows(),
+                               self.normalization.fetch_cols(),
+                               self.normalization.fetch_genes())
+
+            self.detected_384 = False
+            for rowidx, (plate, row, col, gene) in enumerate(current_data):
+                # XXX - should we allow empty genes?
+                if plate == '':
+                    assert row == col == gene == '', "Incomplete data at row %d (plate = '%s', row = '%s', col = '%s', gene = '%s')"%(rowidx + 1, plate, row, col, gene)
+                    continue
+                if self.normalization.shape == '96':
+                    assert row in 'ABCDEFGH', "Bad row for 96 well plate - '%s' at spreadsheet row %d'"%(row, rowidx + 1)
+                    assert 1 <= int(col) <= 12, "Bad col for 96 well plate - '%s' at spreadsheet row %d'"%(col, rowidx + 1)
+                else:
+                    assert 'A' <= row <= 'P', "Bad row for 384 well plate - '%s' at spreadsheet row %d'"%(row, rowidx + 1)
+                    assert 1 <= int(col) <= 24, "Bad col for 384 well plate - '%s' at spreadsheet row %d'"%(col, rowidx + 1)
+                    if (row > 'H') or (col > 12):
+                        self.detected_384 = True
+
+            self.valid = True
+            print "yay", self.detected_384
+            # XXX - tell user things are good to go
+        except Exception, e:
+            import traceback
+            traceback.print_exc()
+            self.valid = False
 
 class Frame(wx.Frame):
     def __init__(self, title, normalization):
