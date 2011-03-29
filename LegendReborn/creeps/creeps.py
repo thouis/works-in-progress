@@ -49,9 +49,11 @@ class Creep(Sprite):
         self.screen = screen
         self.speed = speed
         self.explosion = explosion
+        self.confused = False
         
         self.image = pygame.image.load(img_filename).convert_alpha()
         self.image_w, self.image_h = self.image.get_size()
+        self.img_filename = img_filename
 
         
         # A vector specifying the creep's position on the screen
@@ -127,7 +129,13 @@ class Creep(Sprite):
             while new_distance >= old_distance:
                 newpos = self.pos + (choice([-1, 0, 1]), choice([-1, 0, 1]))
                 new_distance = path[int(newpos.y), int(newpos.x)]
-            time_passed -= (old_distance - new_distance) / self.speed
+                if np.isfinite(new_distance) and (self.confused is not False):
+                    break
+            time_passed -= np.abs(old_distance - new_distance) / self.speed
+            if self.confused is not False:
+                self.confused -= time_passed
+                if self.confused <= 0:
+                    self.confused = False
             # print old_distance, new_distance, old_distance - new_distance, time_passed
             self.pos = newpos
 
@@ -175,8 +183,19 @@ class Tower(Creep):
             if len(self.active_attacks) >= self.max_attacks:
                 return
             if pygame.sprite.collide_circle(self, t):
-                self.active_attacks.append(Attack(self, t))
+                self.active_attacks.append(Attack(self, t, self.special))
                 choice(self.firing_sounds).play()
+
+    def special(self, target):
+        if 'gresh' in self.img_filename:
+            target.confused = 500.0
+            return False
+        if 'vastus' in self.img_filename:
+            # teleport back to beginning
+            target.paths = []
+            return False
+        else:
+            return True
 
     def update(self, time_passed):
         winnings = 0
@@ -190,24 +209,26 @@ class Tower(Creep):
             a.blitme()
                 
 class Attack(Creep):
-    def __init__(self, parent, target):
+    def __init__(self, parent, target, special):
         self.parent = parent
         self.pos = parent.pos
         self.target = target
         self.speed = 0.1
+        self.special = special
 
     def update(self, time_passed):
         delta = self.target.pos - self.pos
+        winnings = 0
         if delta.get_length() < time_passed * self.speed:
             # force it back to the start
-            self.target.paths = []
-            # play the explosion
-            print self.target.explosion.play(fade_ms=50), self.target.explosion
+            if self.special(self.target):
+                self.target.paths = []
+                # play the explosion
+                print self.target.explosion.play(fade_ms=50), self.target.explosion
+                winnings = 5
             self.parent.active_attacks.remove(self)
-            winnings = 5
         else:
             self.pos = self.pos + (delta * (time_passed * self.speed) / delta.get_length())
-            winnings = 0
         return winnings
             
     def blitme(self):
@@ -319,6 +340,7 @@ def run_game():
         'gelu.png',
         'vastus.png',
         'kiina.png',
+        'ackar.png'
         ]
     SELL_FILENAME = 'Sell.png'
     BUTTON_FILENAMES = TOWER_FILENAMES + [SELL_FILENAME]
