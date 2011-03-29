@@ -4,6 +4,7 @@ import wx, wx.html
 import sys
 import random
 import os.path
+import xlrd
 
 app_name = "Plate Normalizer"
 aboutText = """<p>Plate normalizer v0.1.</p>""" 
@@ -29,7 +30,7 @@ class AboutBox(wx.Dialog):
 class TabPanel(wx.Panel):
     #----------------------------------------------------------------------
     def __init__(self, parent, *args):
-        """"""
+        """ """
         wx.Panel.__init__(self, parent=parent)
  
         colors = ["red", "blue", "gray", "yellow", "green"]
@@ -40,12 +41,64 @@ class TabPanel(wx.Panel):
         sizer.Add(btn, 0, wx.ALL, 10)
         self.SetSizer(sizer)
 
-ColumnSelector = TabPanel
+class ColumnSelector(wx.Panel):
+    def __init__(self, parent, callback, substring_hint, normalization):
+        """ """
+        wx.Panel.__init__(self, parent=parent)
+        self.callback = callback
+        self.substring_hint = substring_hint
+        self.normalization = normalization
+
+        normalization.listeners.append(self.input_file_updated)
+
+        self.sheet_selector = wx.ComboBox(self, -1, choices=[], style=wx.CB_READONLY)
+        self.column_selector = wx.ComboBox(self, -1, choices=[], style=wx.CB_READONLY)
+
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        sizer.Add(self.sheet_selector, 1, wx.EXPAND | wx.RIGHT, 5)
+        sizer.Add(self.column_selector, 1, wx.EXPAND)
+        self.SetSizer(sizer)
+
+        self.sheet_selector.Bind(wx.EVT_COMBOBOX, self.select_sheet)
+        self.column_selector.Bind(wx.EVT_COMBOBOX, self.select_column)
+
+    def input_file_updated(self):
+        # find sheet and column names
+        self.sheet_selector.Clear()
+        self.sheet_selector.AppendItems(self.normalization.book.sheet_names())
+        
+    def select_sheet(self, evt):
+        sheet_idx = evt.GetSelection()
+        self.normalization.set_sheet(sheet_idx)
+        self.column_selector.Clear()
+        self.column_selector.AppendItems([c.value for c in self.normalization.book.sheet_by_index(sheet_idx).row(0)])
+
+    def select_column(self, evt):
+        pass
+
  
 class Normalization(object):
     def __init__(self):
         self.input_file = ''
         self.output_file = ''
+        self.sheet = ''
+        self.listeners = []
+    
+    def set_input_file(self, val):
+        self.input_file = val
+        try:
+            self.book = xlrd.open_workbook(self.input_file)
+            self.update_listeners()
+        except:
+            # XXX - report error
+            pass
+
+    def update_listeners(self):
+        for f in self.listeners:
+            f()
+
+    def set_sheet(self, val):
+        self.sheet = val
         
 
 class DataInputOutput(wx.Panel):
@@ -77,11 +130,10 @@ class DataInputOutput(wx.Panel):
         output_browse.Bind(wx.EVT_BUTTON, self.browse_output)
         # TODO - handle text editing
 
-        
     def browse_input(self, evt):
         dlg = wx.FileDialog(self, "Choose an input file (.XLS)", wildcard="*.xls", style=wx.OPEN)
         if dlg.ShowModal() == wx.ID_OK:
-            self.normalization.input_file = dlg.GetPath()
+            self.normalization.set_input_file(dlg.GetPath())
             self.update_files()
         dlg.Destroy()
 
@@ -118,16 +170,16 @@ class PlateLayout(wx.Panel):
 
         plate_column_box = wx.StaticBox(self, wx.ID_ANY, 'Plate column in spreadsheet')
         plate_column_sizer = wx.StaticBoxSizer(plate_column_box, wx.HORIZONTAL)
-        plate_column_selector = ColumnSelector(self, self.set_plate_column, 'plate')
+        plate_column_selector = ColumnSelector(self, self.set_plate_column, 'plate', self.normalization)
         plate_column_sizer.Add(plate_column_selector)
 
         well_column_box = wx.StaticBox(self, wx.ID_ANY, 'Well column(s) in spreadsheet')
         self.well_column_sizer = wx.StaticBoxSizer(well_column_box, wx.VERTICAL)
-        wells_combined = wx.RadioButton(self, -1, 'Wells in single column', style=wx.RB_GROUP)
+        wells_combined = self.wells_combined = wx.RadioButton(self, -1, 'Wells in single column', style=wx.RB_GROUP)
         wells_separate = wx.RadioButton(self, -1, 'Rows & columns in separate columns')
-        self.well_selector = ColumnSelector(self, self.set_well_column, 'well')
-        self.wellrow_selector = ColumnSelector(self, self.set_wellrow_column, 'row')
-        self.wellcol_selector = ColumnSelector(self, self.set_wellcol_column, 'col')
+        self.well_selector = ColumnSelector(self, self.set_well_column, 'well', self.normalization)
+        self.wellrow_selector = ColumnSelector(self, self.set_wellrow_column, 'row', self.normalization)
+        self.wellcol_selector = ColumnSelector(self, self.set_wellcol_column, 'col', self.normalization)
         self.well_column_sizer.Add(wells_combined, 0)
         self.well_column_sizer.Add(wells_separate, 0, wx.TOP, 5)
         self.well_column_sizer.Add(self.well_selector, 0, wx.EXPAND | wx.TOP, 5)
@@ -142,7 +194,10 @@ class PlateLayout(wx.Panel):
         shapeb2.Bind(wx.EVT_RADIOBUTTON, self.set_shape)
         shapeb3.Bind(wx.EVT_RADIOBUTTON, self.set_shape)
 
-        sizer = wx.BoxSizer(wx.VERTICAL)
+        wells_combined.Bind(wx.EVT_RADIOBUTTON, self.set_wells_combined)
+        wells_separate.Bind(wx.EVT_RADIOBUTTON, self.set_wells_combined)
+
+        self.topsizer = sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(shape_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(plate_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(self.well_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -162,6 +217,17 @@ class PlateLayout(wx.Panel):
 
     def set_shape(self, evt):
         self.normalization.shape = evt.EventObject.Label
+
+    def set_wells_combined(self, evt):
+        if evt.EventObject == self.wells_combined:
+            self.well_column_sizer.Show(self.well_selector)
+            self.well_column_sizer.Hide(self.wellrow_selector)
+            self.well_column_sizer.Hide(self.wellcol_selector)
+        else:
+            self.well_column_sizer.Hide(self.well_selector)
+            self.well_column_sizer.Show(self.wellrow_selector)
+            self.well_column_sizer.Show(self.wellcol_selector)
+        self.topsizer.Layout()
 
 
 class Frame(wx.Frame):
