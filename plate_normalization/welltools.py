@@ -2,7 +2,7 @@ import re
 
 def extract_row(well):
     well = well.upper().strip()
-    if 'A' <= well[0] <= 'P':
+    if len(well) > 0 and 'A' <= well[0] <= 'P':
         return well[0]
     return '(could not parse row from %s)'%(well)
     

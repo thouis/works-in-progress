@@ -10,6 +10,8 @@ from welltools import extract_row, extract_col
 app_name = "Plate Normalizer"
 aboutText = """<p>Plate normalizer v0.1.</p>""" 
 
+DETECT = 'Detect'
+
 class HtmlWindow(wx.html.HtmlWindow):
     def __init__(self, parent, id, size=(600,400)):
         wx.html.HtmlWindow.__init__(self,parent, id, size=size)
@@ -73,8 +75,21 @@ class ColumnSelector(wx.Panel):
         sheet_idx = evt.GetSelection()
         self.sheet_idx = sheet_idx
         self.column_selector.Clear()
-        self.column_selector.AppendItems([c.value for c in self.normalization.book.sheet_by_index(sheet_idx).row(0)])
-        # XXX - set column to default
+        column_names = [c.value for c in self.normalization.book.sheet_by_index(sheet_idx).row(0)]
+        self.column_selector.AppendItems(column_names)
+        default = min([idx for idx, name in enumerate(column_names) if self.substring_hint in name.lower()] or [-1])
+        if default > -1:
+            self.column_selector.Selection = default
+            newevt = wx.PyCommandEvent(wx.wxEVT_COMMAND_COMBOBOX_SELECTED)
+            newevt.SetInt(default)
+            wx.PostEvent(self.column_selector, newevt)
+
+    def set_default_sheet(self, idx):
+        # set a default sheet and trigger a select event
+        self.sheet_selector.Selection = idx
+        newevt = wx.PyCommandEvent(wx.wxEVT_COMMAND_COMBOBOX_SELECTED)
+        newevt.SetInt(idx)
+        wx.PostEvent(self.sheet_selector, newevt)
 
     def select_column(self, evt):
         colidx = evt.GetSelection()
@@ -88,7 +103,7 @@ class Normalization(object):
     def __init__(self):
         self.input_file = ''
         self.output_file = ''
-        self.shape = ''
+        self.shape = DETECT
         self.plate_column = ()
         self.well_column = ()
         self.wellrow_column = ()
@@ -196,7 +211,7 @@ class PlateLayout(wx.Panel):
         shape_sizer = wx.StaticBoxSizer(shape_box, wx.HORIZONTAL)
         shapeb1 = wx.RadioButton(self, -1, '96', style=wx.RB_GROUP)
         shapeb2 = wx.RadioButton(self, -1, '384')
-        shapeb3 = wx.RadioButton(self, -1, 'Detect')
+        shapeb3 = wx.RadioButton(self, -1, DETECT)
         shape_sizer.Add((1,1), 2)
         shape_sizer.Add(shapeb1, 0)
         shape_sizer.Add((1,1), 1)
@@ -204,6 +219,7 @@ class PlateLayout(wx.Panel):
         shape_sizer.Add((1,1), 1)
         shape_sizer.Add(shapeb3, 0)
         shape_sizer.Add((1,1), 2)
+        shapeb3.Value = 1
 
         plate_column_box = wx.StaticBox(self, wx.ID_ANY, 'Plate column in spreadsheet')
         plate_column_sizer = wx.StaticBoxSizer(plate_column_box, wx.VERTICAL)
@@ -225,9 +241,13 @@ class PlateLayout(wx.Panel):
 
         gene_column_box = wx.StaticBox(self, wx.ID_ANY, 'Gene column in spreadsheet')
         gene_column_sizer = wx.StaticBoxSizer(gene_column_box, wx.VERTICAL)
-        gene_column_selector = ColumnSelector(self, self.set_gene_column, 'gene', self.normalization)
-        gene_column_sizer.Add(gene_column_selector, 0, wx.EXPAND)
+        self.gene_column_selector = ColumnSelector(self, self.set_gene_column, 'gene', self.normalization)
+        gene_column_sizer.Add(self.gene_column_selector, 0, wx.EXPAND)
 
+        status_box = wx.StaticBox(self, wx.ID_ANY, 'Status')
+        status_sizer = wx.StaticBoxSizer(status_box, wx.VERTICAL)
+        self.status_text = wx.StaticText(self, -1, "Choose settings...")
+        status_sizer.Add(self.status_text, 0, wx.EXPAND)
 
         wells_combined.Value = True
         self.well_column_sizer.Hide(self.wellrow_selector)
@@ -245,6 +265,7 @@ class PlateLayout(wx.Panel):
         sizer.Add(plate_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(self.well_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(gene_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        sizer.Add(status_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(sizer)
     
     def set_shape(self, evt):
@@ -253,6 +274,9 @@ class PlateLayout(wx.Panel):
 
     def set_plate_column(self, val):
         self.normalization.plate_column = val
+        # fill well and gene selectors, as well
+        for sel in [self.well_selector, self.wellrow_selector, self.wellcol_selector, self.gene_column_selector]:
+            sel.set_default_sheet(val[0])
         self.preflight()
 
     def set_well_column(self, val):
@@ -297,6 +321,9 @@ class PlateLayout(wx.Panel):
                                self.normalization.fetch_genes())
 
             self.detected_384 = False
+            num_rows = 0
+            gene_counts = {}
+            wells_per_plate = {}
             for rowidx, (plate, row, col, gene) in enumerate(current_data):
                 # XXX - should we allow empty genes?
                 if plate == '':
@@ -308,15 +335,49 @@ class PlateLayout(wx.Panel):
                 else:
                     assert 'A' <= row <= 'P', "Bad row for 384 well plate - '%s' at spreadsheet row %d'"%(row, rowidx + 1)
                     assert 1 <= int(col) <= 24, "Bad col for 384 well plate - '%s' at spreadsheet row %d'"%(col, rowidx + 1)
-                    if (row > 'H') or (col > 12):
+                    if (row > 'H') or (int(col) > 12):
                         self.detected_384 = True
+                num_rows += 1
+                wells_per_plate[plate] = wells_per_plate.get(plate, 0) + 1
+                gene_counts[gene] = gene_counts.get(gene, 0) + 1
 
+
+            # XXX - check multiple plates for matching well/gene information
+
+            # count number of plates, wells, and wells per gene
             self.valid = True
-            print "yay", self.detected_384
-            # XXX - tell user things are good to go
+            plate_shape = self.normalization.shape
+            autodetected = ""
+            if plate_shape == DETECT:
+                plate_shape = "384" if self.detected_384 else "96"
+                autodetected = " (autodetected)"
+
+            if min(wells_per_plate.values()) == max(wells_per_plate.values()):
+                plate_counts_text = "Wells per plate: %d"%(wells_per_plate.values()[0])
+            else:
+                plate_counts_text = ["Variable number of wells per plate:"]
+                plate_counts_text += sorted(["    %s : %d"%(p, v) for p, v in wells_per_plate.iteritems()])
+                plate_counts_text = "\n".join(plate_counts_text)
+
+            # report top 10 genes by count
+            countgenes = sorted([(c, g) for g, c in gene_counts.iteritems()])[-10:][::-1]
+            gene_counts_text = "\n".join(["Number of wells per gene, top 10:"] + 
+                                         ["   %s : %d"%(g, c) for (c, g) in countgenes])
+
+            status = "\n".join(["Plate Type: %s%s" %(plate_shape, autodetected),
+                                "Number of plates: %d"%(len(wells_per_plate)),
+                                plate_counts_text,
+                                gene_counts_text])
+                      
+            self.status_text.Label = status
+            self.topsizer.Layout()
+        except AssertionError, e:
+            self.status_text.Label = "Parsing error:\n" + e.message
+            self.valid = False
         except Exception, e:
             import traceback
             traceback.print_exc()
+            self.status_text.Label = "Choose settings..."
             self.valid = False
 
 class Frame(wx.Frame):
