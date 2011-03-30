@@ -112,6 +112,7 @@ class Normalization(object):
         self.gene_column = ()
 
         self.listeners = []
+        self.parsing_listeners = []
     
     def set_input_file(self, val):
         self.input_file = val
@@ -124,6 +125,10 @@ class Normalization(object):
 
     def update_listeners(self):
         for f in self.listeners:
+            f()
+
+    def parsing_finished(self):
+        for f in self.parsing_listeners:
             f()
 
     
@@ -180,6 +185,8 @@ class DataInputOutput(wx.Panel):
 
         input_browse.Bind(wx.EVT_BUTTON, self.browse_input)
         output_browse.Bind(wx.EVT_BUTTON, self.browse_output)
+
+        self.normalization.listeners.append(self.update_files)
         # TODO - handle text editing
 
     def browse_input(self, evt):
@@ -369,8 +376,12 @@ class PlateLayout(wx.Panel):
                                 plate_counts_text,
                                 gene_counts_text])
                       
+            self.normalization.gene_counts = gene_counts
             self.status_text.Label = status
             self.topsizer.Layout()
+
+            self.normalization.parsing_finished()
+
         except AssertionError, e:
             self.status_text.Label = "Parsing error:\n" + e.message
             self.valid = False
@@ -379,6 +390,48 @@ class PlateLayout(wx.Panel):
             traceback.print_exc()
             self.status_text.Label = "Choose settings..."
             self.valid = False
+
+class Controls(wx.Panel):
+    def __init__(self, parent, normalization):
+        wx.Panel.__init__(self, parent=parent)
+        self.normalization = normalization
+
+        shape_box = wx.StaticBox(self, wx.ID_ANY, 'Choose control populations')
+        shape_sizer = wx.StaticBoxSizer(shape_box, wx.HORIZONTAL)
+        self.grid_sizer = wx.FlexGridSizer(21, 5)
+        shape_sizer.Add(self.grid_sizer, 1, wx.EXPAND)
+
+        for idx in range(5):
+            self.grid_sizer.AddGrowableCol(idx, 1)
+        
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(shape_sizer, 1, wx.EXPAND)
+        self.SetSizer(sizer)
+        self.Layout()
+
+        self.normalization.parsing_listeners.append(self.update)
+        
+    def update(self):
+        print "updating Controls panel"
+        # populate with genes, counts, radiobuttons
+        self.grid_sizer.DeleteWindows()
+        
+        countgenes = sorted([(c, g) for g, c in self.normalization.gene_counts.iteritems()])[-20:][::-1]
+
+        self.grid_sizer.Add(wx.StaticText(self, -1, "Gene Name"))
+        self.grid_sizer.Add(wx.StaticText(self, -1, "Count"))
+        self.grid_sizer.Add(wx.StaticText(self, -1, "Tested Population"), flag=wx.ALIGN_CENTER)
+        self.grid_sizer.Add(wx.StaticText(self, -1, "Negative Control"), flag=wx.ALIGN_CENTER)
+        self.grid_sizer.Add(wx.StaticText(self, -1, "Positive Control"), flag=wx.ALIGN_CENTER)
+        for count, gene in countgenes:
+            self.grid_sizer.Add(wx.StaticText(self, -1, gene))
+            self.grid_sizer.Add(wx.StaticText(self, -1, "%d"%(count)))
+            self.grid_sizer.Add(wx.RadioButton(self, -1, style=wx.RB_GROUP), flag=wx.ALIGN_CENTER)
+            self.grid_sizer.Add(wx.RadioButton(self, -1), flag=wx.ALIGN_CENTER)
+            self.grid_sizer.Add(wx.RadioButton(self, -1), flag=wx.ALIGN_CENTER)
+        self.grid_sizer.Layout()
+        # XXX - put in lines
+
 
 class Frame(wx.Frame):
     def __init__(self, title, normalization):
@@ -405,9 +458,7 @@ class Frame(wx.Frame):
 
         notebook.AddPage(DataInputOutput(notebook, self.normalization), "Data Input/Output")
         notebook.AddPage(PlateLayout(notebook, self.normalization), "Plate Layout")
-
-        tabTwo = TabPanel(notebook)
-        notebook.AddPage(tabTwo, "Controls")
+        notebook.AddPage(Controls(notebook, self.normalization), "Controls")
 
         tabTwo = TabPanel(notebook)
         notebook.AddPage(tabTwo, "Normalization")
@@ -443,7 +494,11 @@ class Frame(wx.Frame):
                 title += ' -> %s'%(os.path.basename(self.normalization.output_file))
         self.Title = title
 
+
+normalization = Normalization()
 app = wx.App(redirect=False) 
-top = Frame(app_name, Normalization())
+top = Frame(app_name, normalization)
+if len(sys.argv) > 1:
+    normalization.set_input_file(sys.argv[1])
 top.Show()
 app.MainLoop()
