@@ -12,6 +12,7 @@ import pygame.surfarray
 from pygame.sprite import Sprite
 import pygame.mixer as mixer
 import pygame.font
+import pygame.gfxdraw as gfxdraw
 
 from vec2d import vec2d
 
@@ -177,28 +178,44 @@ class Tower(Creep):
         self.max_attacks = kwargs.pop('max_attacks')
         Creep.__init__(self, *args, **kwargs)
         self.active_attacks = []
+        self.blasting = False
 
     def attack(self, targets):
         for t in set(targets) - set(a.target for a in self.active_attacks) :
             if len(self.active_attacks) >= self.max_attacks:
                 return
             if pygame.sprite.collide_circle(self, t):
-                self.active_attacks.append(Attack(self, t, self.special))
-                choice(self.firing_sounds).play()
+                vis = self.visible_attack()
+                self.active_attacks.append(Attack(self, t, self.special, vis))
+                if vis:
+                    choice(self.firing_sounds).play()
 
     def special(self, target):
         if 'gresh' in self.img_filename:
             target.confused = 500.0
             return False
-        if 'vastus' in self.img_filename:
+        elif 'vastus' in self.img_filename:
             # teleport back to beginning
             target.paths = []
             return False
+        elif 'ackar' in self.img_filename:
+            # fire blast
+            self.blasting = [100, target]
         else:
+            print "default"
             return True
+
+    def visible_attack(self):
+        return not 'ackar' in self.img_filename
 
     def update(self, time_passed):
         winnings = 0
+        if self.blasting:
+            self.blasting[0] -= time_passed
+            if self.blasting[0] <= 0:
+                self.blasting[1].paths = []
+                self.blasting = False
+                winnings = 5
         for a in self.active_attacks:
             winnings += a.update(time_passed)
         return winnings
@@ -207,21 +224,35 @@ class Tower(Creep):
         Creep.blitme(self)
         for a in self.active_attacks:
             a.blitme()
+        if self.blasting:
+            target = self.blasting[1]
+            for idx in range(5):
+                offsets = [4 * random() - 2.0 for i in range(4)]
+                gfxdraw.line(self.screen,
+                             self.pos.x + offsets[0], 
+                             self.pos.y + offsets[1],
+                             target.pos.x + offsets[2],
+                             target.pos.y + offsets[3],
+                             pygame.Color(255, 0, 0))
                 
 class Attack(Creep):
-    def __init__(self, parent, target, special):
+    def __init__(self, parent, target, special=None, visible=True, img=None):
         self.parent = parent
         self.pos = parent.pos
         self.target = target
         self.speed = 0.1
         self.special = special
+        self.visible = visible
+        self.image = img
+        if self.image:
+            self.image_w, self.image_h = self.image.get_size()
 
     def update(self, time_passed):
         delta = self.target.pos - self.pos
         winnings = 0
         if delta.get_length() < time_passed * self.speed:
             # force it back to the start
-            if self.special(self.target):
+            if (not self.special) or self.special(self.target):
                 self.target.paths = []
                 # play the explosion
                 print self.target.explosion.play(fade_ms=50), self.target.explosion
@@ -232,7 +263,35 @@ class Attack(Creep):
         return winnings
             
     def blitme(self):
-        pygame.draw.circle(self.parent.screen, pygame.Color(255, 255, 255), self.pos, 5)
+        if self.visible:
+            if self.image:
+                draw_pos = self.image.get_rect().move(
+                    self.pos.x - self.image_w / 2, 
+                    self.pos.y - self.image_h / 2)
+                self.parent.screen.blit(self.image, draw_pos)
+            else:
+                pygame.draw.circle(self.parent.screen, pygame.Color(255, 255, 255), self.pos, 5)
+
+class GlobalAttacks(Tower):
+    def update(self, time_passed):
+        winnings = 0
+        for a in self.active_attacks:
+            winnings += a.update(time_passed)
+        return winnings
+
+    def blitme(self):
+        for a in self.active_attacks:
+            a.blitme()
+
+    def ready(self):
+        return self.active_attacks == []
+
+    def target(self, target):
+        self.pos = vec2d(target.pos.x, 10)
+        self.active_attacks.append(Attack(self,
+                                          target,
+                                          img=self.image))
+        
 
 class Button(Creep):
     def __init__(self, *args, **kwargs):
@@ -340,12 +399,13 @@ def run_game():
         'gelu.png',
         'vastus.png',
         'kiina.png',
-        'ackar.png'
+        'ackar.png',
         ]
     SELL_FILENAME = 'Sell.png'
-    BUTTON_FILENAMES = TOWER_FILENAMES + [SELL_FILENAME]
+    RAIN_OF_FIRE = 'rain_of_fire.png'
+    BUTTON_FILENAMES = TOWER_FILENAMES + [RAIN_OF_FIRE, SELL_FILENAME]
 
-    money = 1000
+    money = 643823726935627492742129573207
 
     mixer.pre_init(44100, -16, 2, 2048) # setup mixer to avoid sound lag
     mixer.init()
@@ -353,7 +413,7 @@ def run_game():
     print "mix", mixer.get_num_channels()
     EXPLOSIONS = [mixer.Sound('expl%d.wav'%(i)) for i in range(1, 7)]
     FIRING = [mixer.Sound('fire%d.wav'%(i)) for i in range(1, 4)]
-    N_CREEPS = 50
+    N_CREEPS = 44
     N_TOWERS = 0
 
     pygame.init()
@@ -415,6 +475,12 @@ def run_game():
 
     font = pygame.font.SysFont(pygame.font.get_default_font(), 20, bold=True)
 
+    global_attacks = GlobalAttacks(screen, RAIN_OF_FIRE,
+                                   (randint(0, background.get_size()[0]), randint(0, background.get_size()[1])),
+                                   (1, 1),
+                                   0.0,
+                                   paths, radius=100, max_attacks=3, firing_sounds=FIRING)
+
     # The main game loop
     #
     rect = pygame.Rect((1, 1), (10, 10))
@@ -433,15 +499,23 @@ def run_game():
                     collided = False
                     for b in buttons:
                         if b.rect.colliderect(rect):
-                            selling = b == buttons[-1]
-                            if not selling:
+                            selling = (b.img_filename == SELL_FILENAME)
+                            rain_of_fire = (b.img_filename == RAIN_OF_FIRE)
+                            buying = (not selling) and (not rain_of_fire)
+                            if buying:
                                 next_tower = BUTTON_FILENAMES[buttons.index(b)]
-                            cursor.change_image(BUTTON_FILENAMES[buttons.index(b)])
+                                cursor.change_image(next_tower)
+                            if rain_of_fire:
+                                # only one rain of fire available at a time
+                                if global_attacks.ready():
+                                    for i in range(20):
+                                        target = choice(creeps)
+                                        global_attacks.target(target)
                             collided = True
                     for t in towers:
                         if cursor.rect.colliderect(t.rect):
                             collided = t
-                    if not collided and not selling and money > 100:
+                    if not collided and not selling and money >= 100:
                         towers += [Tower(screen,
                                          next_tower,
                                          pygame.mouse.get_pos(),
@@ -468,9 +542,11 @@ def run_game():
             tower.attack(creeps)
             money += tower.update(time_passed)
 
+        money += global_attacks.update(time_passed)
+        
         cursor.update()
 
-        for obj in creeps + towers + buttons + [cursor]:
+        for obj in creeps + towers + buttons + [global_attacks, cursor]:
             obj.blitme()
             
         money_text = font.render("%d"%(money), True, pygame.Color(0, 0, 0))
