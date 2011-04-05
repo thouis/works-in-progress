@@ -236,9 +236,12 @@ class Tower(Creep):
                              pygame.Color(255, 0, 0))
                 
 class Attack(Creep):
-    def __init__(self, parent, target, special=None, visible=True, img=None):
+    def __init__(self, parent, target, special=None, visible=True, img=None, pos=None):
         self.parent = parent
-        self.pos = parent.pos
+        if not pos:
+            self.pos = parent.pos
+        else:
+            self.pos = pos
         self.target = target
         self.speed = 0.1
         self.special = special
@@ -272,6 +275,30 @@ class Attack(Creep):
             else:
                 pygame.draw.circle(self.parent.screen, pygame.Color(255, 255, 255), self.pos, 5)
 
+class MobileAttack(Attack):
+    def update(self, time_passed):
+        delta = self.target[0].pos - self.pos
+        if delta.get_length() < time_passed * self.speed:
+            self.target[0].confused = 5000.0
+            self.target = self.target[1:]
+            if len(self.target) == 0:
+                self.parent.active_attacks.remove(self)
+        else:
+            self.pos = self.pos + (delta * (time_passed * self.speed) / delta.get_length())
+        return 0
+            
+    def blitme(self):
+        if self.visible:
+            if self.image:
+                draw_pos = self.image.get_rect().move(
+                    self.pos.x - self.image_w / 2, 
+                    self.pos.y - self.image_h)
+                self.parent.screen.blit(self.image, draw_pos)
+            else:
+                pygame.draw.circle(self.parent.screen, pygame.Color(255, 255, 255), self.pos, 5)
+    
+
+# inherit from tower to manage attacks
 class GlobalAttacks(Tower):
     def update(self, time_passed):
         winnings = 0
@@ -284,6 +311,7 @@ class GlobalAttacks(Tower):
             a.blitme()
 
     def ready(self):
+        return True
         return self.active_attacks == []
 
     def target(self, target):
@@ -291,6 +319,8 @@ class GlobalAttacks(Tower):
         self.active_attacks.append(Attack(self,
                                           target,
                                           img=self.image))
+    def add_attack(self, attack):
+        self.active_attacks.append(attack)
         
 
 class Button(Creep):
@@ -403,7 +433,8 @@ def run_game():
         ]
     SELL_FILENAME = 'Sell.png'
     RAIN_OF_FIRE = 'rain_of_fire.png'
-    BUTTON_FILENAMES = TOWER_FILENAMES + [RAIN_OF_FIRE, SELL_FILENAME]
+    TORNADO = 'tornado.png'
+    BUTTON_FILENAMES = TOWER_FILENAMES + [RAIN_OF_FIRE, TORNADO, SELL_FILENAME]
 
     money = 643823726935627492742129573207
 
@@ -475,6 +506,8 @@ def run_game():
 
     font = pygame.font.SysFont(pygame.font.get_default_font(), 20, bold=True)
 
+    tornado_img = pygame.image.load(TORNADO).convert_alpha()
+
     global_attacks = GlobalAttacks(screen, RAIN_OF_FIRE,
                                    (randint(0, background.get_size()[0]), randint(0, background.get_size()[1])),
                                    (1, 1),
@@ -501,16 +534,26 @@ def run_game():
                         if b.rect.colliderect(rect):
                             selling = (b.img_filename == SELL_FILENAME)
                             rain_of_fire = (b.img_filename == RAIN_OF_FIRE)
+                            tornado = (b.img_filename == TORNADO)
                             buying = (not selling) and (not rain_of_fire)
                             if buying:
                                 next_tower = BUTTON_FILENAMES[buttons.index(b)]
                                 cursor.change_image(next_tower)
-                            if rain_of_fire:
-                                # only one rain of fire available at a time
-                                if global_attacks.ready():
+                            # only one rain of fire available at a time
+                            if global_attacks.ready():
+                                if rain_of_fire:
                                     for i in range(20):
                                         target = choice(creeps)
                                         global_attacks.target(target)
+                            if tornado:
+                                targets = [choice(creeps) for i in range(20)]
+                                tornado_attack = MobileAttack(global_attacks, 
+                                                              targets, 
+                                                              img=tornado_img, 
+                                                              pos=vec2d((randint(0, background.get_size()[0]), 
+                                                                         randint(0, background.get_size()[1]))))
+                                tornado_attack.speed = 0.2
+                                global_attacks.add_attack(tornado_attack)
                             collided = True
                     for t in towers:
                         if cursor.rect.colliderect(t.rect):
