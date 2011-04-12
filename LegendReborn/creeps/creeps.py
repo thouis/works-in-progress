@@ -12,7 +12,7 @@ import pygame.surfarray
 from pygame.sprite import Sprite
 import pygame.mixer as mixer
 import pygame.font
-import pygame.gfxdraw as gfxdraw
+import pygame.draw
 
 from vec2d import vec2d
 
@@ -55,6 +55,8 @@ class Creep(Sprite):
         self.image = pygame.image.load(img_filename).convert_alpha()
         self.image_w, self.image_h = self.image.get_size()
         self.img_filename = img_filename
+
+        self.health = 100
 
         
         # A vector specifying the creep's position on the screen
@@ -154,6 +156,9 @@ class Creep(Sprite):
             self.pos.y - self.image_h / 2)
         self.rect = draw_pos
         self.screen.blit(self.image, draw_pos)
+        if self.health > 0:
+            health_rectangle = pygame.Rect(self.pos.x - self.image_w / 2, self.pos.y - self.image_h / 2 - 3, self.health / 3, 3)
+            pygame.draw.rect(self.screen, pygame.Color(255, 0, 0), health_rectangle, 0)
            
     #------------------ PRIVATE PARTS ------------------#
     
@@ -179,6 +184,7 @@ class Tower(Creep):
         Creep.__init__(self, *args, **kwargs)
         self.active_attacks = []
         self.blasting = False
+        self.health = 0
 
     def attack(self, targets):
         for t in set(targets) - set(a.target for a in self.active_attacks) :
@@ -228,12 +234,13 @@ class Tower(Creep):
             target = self.blasting[1]
             for idx in range(5):
                 offsets = [4 * random() - 2.0 for i in range(4)]
-                gfxdraw.line(self.screen,
-                             self.pos.x + offsets[0], 
-                             self.pos.y + offsets[1],
-                             target.pos.x + offsets[2],
-                             target.pos.y + offsets[3],
-                             pygame.Color(255, 0, 0))
+                pygame.draw.line(self.screen,
+                                 pygame.Color(255, 0, 0),
+                                 (self.pos.x + offsets[0], 
+                                 self.pos.y + offsets[1]),
+                                 (target.pos.x + offsets[2],
+                                  target.pos.y + offsets[3]))
+                                 
                 
 class Attack(Creep):
     def __init__(self, parent, target, special=None, visible=True, img=None, pos=None):
@@ -256,10 +263,13 @@ class Attack(Creep):
         if delta.get_length() < time_passed * self.speed:
             # force it back to the start
             if (not self.special) or self.special(self.target):
-                self.target.paths = []
+                self.target.health -= 10
+                if self.target.health <= 0:
+                    winnings = 5
+                    self.target.paths = []
+                    self.target.health = 100
                 # play the explosion
                 print self.target.explosion.play(fade_ms=50), self.target.explosion
-                winnings = 5
             self.parent.active_attacks.remove(self)
         else:
             self.pos = self.pos + (delta * (time_passed * self.speed) / delta.get_length())
@@ -444,7 +454,7 @@ def run_game():
     print "mix", mixer.get_num_channels()
     EXPLOSIONS = [mixer.Sound('expl%d.wav'%(i)) for i in range(1, 7)]
     FIRING = [mixer.Sound('fire%d.wav'%(i)) for i in range(1, 4)]
-    N_CREEPS = 44
+    N_CREEPS = 10
     N_TOWERS = 0
 
     pygame.init()
