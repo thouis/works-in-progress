@@ -336,6 +336,7 @@ class GlobalAttacks(Tower):
 class Button(Creep):
     def __init__(self, *args, **kwargs):
         Creep.__init__(self, *args, **kwargs)
+        self.health = 0
         bg = pygame.Surface(self.image.get_size())
         bg.fill((128, 128, 128))
         bg.blit(self.image, (0, 0))
@@ -345,6 +346,7 @@ class Button(Creep):
 class Cursor(Creep):
     def __init__(self, *args, **kwargs):
         Creep.__init__(self, *args, **kwargs)
+        self.health = 0
         self.fix_im()
 
     def change_image(self, *args, **kwargs):
@@ -440,10 +442,12 @@ def run_game():
         'vastus.png',
         'kiina.png',
         'ackar.png',
+        'straak.png'
         ]
     SELL_FILENAME = 'Sell.png'
     RAIN_OF_FIRE = 'rain_of_fire.png'
     TORNADO = 'tornado.png'
+    TORNADO_BIG = 'tornado_big.png'
     BUTTON_FILENAMES = TOWER_FILENAMES + [RAIN_OF_FIRE, TORNADO, SELL_FILENAME]
 
     money = 643823726935627492742129573207
@@ -503,8 +507,12 @@ def run_game():
 
 
     rightedge = screen.get_width() - 5
-    for b in buttons:
+    for b in buttons[:len(buttons)//2]:
         b.pos = vec2d(rightedge - b.image.get_width() / 2, 5 + b.image.get_height() / 2)
+        rightedge -= (b.image.get_width() + 5)
+    rightedge = screen.get_width() - 5
+    for b in buttons[len(buttons)//2:]:
+        b.pos = vec2d(rightedge - b.image.get_width() / 2, 5 + b.image.get_height() / 2 + 80)
         rightedge -= (b.image.get_width() + 5)
 
     next_tower = TOWER_FILENAMES[0]
@@ -516,7 +524,7 @@ def run_game():
 
     font = pygame.font.SysFont(pygame.font.get_default_font(), 20, bold=True)
 
-    tornado_img = pygame.image.load(TORNADO).convert_alpha()
+    tornado_img = pygame.image.load(TORNADO_BIG).convert_alpha()
 
     global_attacks = GlobalAttacks(screen, RAIN_OF_FIRE,
                                    (randint(0, background.get_size()[0]), randint(0, background.get_size()[1])),
