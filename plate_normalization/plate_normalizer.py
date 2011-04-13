@@ -1,6 +1,6 @@
 import wxversion
 wxversion.select("2.8")
-import wx, wx.html
+import wx, wx.html, wx.lib.scrolledpanel
 import sys
 import random
 import os.path
@@ -395,17 +395,21 @@ class Controls(wx.Panel):
     def __init__(self, parent, normalization):
         wx.Panel.__init__(self, parent=parent)
         self.normalization = normalization
+        self.row_controls = []
 
-        shape_box = wx.StaticBox(self, wx.ID_ANY, 'Choose control populations')
-        shape_sizer = wx.StaticBoxSizer(shape_box, wx.HORIZONTAL)
-        self.grid_sizer = wx.FlexGridSizer(21, 5)
-        shape_sizer.Add(self.grid_sizer, 1, wx.EXPAND)
+        box = wx.StaticBox(self, wx.ID_ANY, 'Choose control populations')
+        box_sizer = wx.StaticBoxSizer(box, wx.VERTICAL)
 
-        for idx in range(5):
-            self.grid_sizer.AddGrowableCol(idx, 1)
-        
+        self.scroll_window = wx.lib.scrolledpanel.ScrolledPanel(self, -1)
+        box_sizer.Add(self.scroll_window, 1, wx.EXPAND)
+
+        self.row_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.scroll_window.SetSizer(self.row_sizer)
+
+        self.scroll_window.SetupScrolling(False, True)
+
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(shape_sizer, 1, wx.EXPAND)
+        sizer.Add(box_sizer, 1, wx.EXPAND)
         self.SetSizer(sizer)
         self.Layout()
 
@@ -414,24 +418,50 @@ class Controls(wx.Panel):
     def update(self):
         print "updating Controls panel"
         # populate with genes, counts, radiobuttons
-        self.grid_sizer.DeleteWindows()
+        self.row_controls = []
+        self.row_sizer.DeleteWindows()
         
-        countgenes = sorted([(c, g) for g, c in self.normalization.gene_counts.iteritems()])[-20:][::-1]
+        def make_row(panel, g, c, t, n, p):
+            self.row_controls.append([g, c, t, n, p])
+            sizer = wx.BoxSizer(wx.HORIZONTAL)
+            sizer.Add(g, 1, wx.ALIGN_CENTER)
+            sizer.Add(c, 1, wx.ALIGN_CENTER)
+            sizer.Add(t, 1, wx.ALIGN_CENTER)
+            sizer.Add(n, 1, wx.ALIGN_CENTER)
+            sizer.Add(p, 1, wx.ALIGN_CENTER)
+            panel.SetSizer(sizer)
+            return panel
 
-        self.grid_sizer.Add(wx.StaticText(self, -1, "Gene Name"))
-        self.grid_sizer.Add(wx.StaticText(self, -1, "Count"))
-        self.grid_sizer.Add(wx.StaticText(self, -1, "Tested Population"), flag=wx.ALIGN_CENTER)
-        self.grid_sizer.Add(wx.StaticText(self, -1, "Negative Control"), flag=wx.ALIGN_CENTER)
-        self.grid_sizer.Add(wx.StaticText(self, -1, "Positive Control"), flag=wx.ALIGN_CENTER)
-        for count, gene in countgenes:
-            self.grid_sizer.Add(wx.StaticText(self, -1, gene))
-            self.grid_sizer.Add(wx.StaticText(self, -1, "%d"%(count)))
-            self.grid_sizer.Add(wx.RadioButton(self, -1, style=wx.RB_GROUP), flag=wx.ALIGN_CENTER)
-            self.grid_sizer.Add(wx.RadioButton(self, -1), flag=wx.ALIGN_CENTER)
-            self.grid_sizer.Add(wx.RadioButton(self, -1), flag=wx.ALIGN_CENTER)
-        self.grid_sizer.Layout()
-        # XXX - put in lines
+        # sort by count, then name
+        countgenes = sorted([(-c, g) for g, c in self.normalization.gene_counts.iteritems()])
+        countgenes = [(-c, g) for c, g in countgenes]
 
+        panel = wx.Panel(self.scroll_window, -1)
+        panel.BackgroundColour = "light blue"
+        self.row_sizer.Add(make_row(panel,
+                                    wx.StaticText(panel, -1, "Gene Name"),
+                                    wx.StaticText(panel, -1, "Count"),
+                                    wx.StaticText(panel, -1, "Tested Population"),
+                                    wx.StaticText(panel, -1, "Negative Control"),
+                                    wx.StaticText(panel, -1, "Positive Control")), 
+                           0, wx.EXPAND)
+
+        for idx, (count, gene) in enumerate(countgenes):
+            panel = wx.Panel(self.scroll_window, -1)
+            panel.BackgroundColour = "grey" if (idx % 2) else "white"
+            self.row_sizer.Add(make_row(panel,
+                                        wx.StaticText(panel, -1, gene),
+                                        wx.StaticText(panel, -1, "%d"%(count)),
+                                        wx.RadioButton(panel, -1, style=wx.RB_GROUP),
+                                        wx.RadioButton(panel, -1),
+                                        wx.RadioButton(panel, -1)),
+                               0, wx.EXPAND)
+
+        for g, c, t, n, p in self.row_controls[1:]:
+            t.Value = True
+
+        self.row_sizer.Layout()
+        self.scroll_window.VirtualSize = self.scroll_window.BestVirtualSize
 
 class Frame(wx.Frame):
     def __init__(self, title, normalization):
