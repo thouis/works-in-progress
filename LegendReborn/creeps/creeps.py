@@ -194,7 +194,8 @@ class Tower(Creep):
                 vis = self.visible_attack()
                 self.active_attacks.append(Attack(self, t, self.special, vis))
                 if vis:
-                    choice(self.firing_sounds).play()
+                    # choice(self.firing_sounds).play()
+                    pass
 
     def special(self, target):
         if 'gresh' in self.img_filename:
@@ -219,9 +220,12 @@ class Tower(Creep):
         if self.blasting:
             self.blasting[0] -= time_passed
             if self.blasting[0] <= 0:
-                self.blasting[1].paths = []
+                self.blasting[1].health -= 10
+                if self.blasting[1].health <= 0:
+                    winnings = 5
+                    self.blasting[1].paths = []
+                    self.blasting[1].health = 100
                 self.blasting = False
-                winnings = 5
         for a in self.active_attacks:
             winnings += a.update(time_passed)
         return winnings
@@ -269,7 +273,7 @@ class Attack(Creep):
                     self.target.paths = []
                     self.target.health = 100
                 # play the explosion
-                print self.target.explosion.play(fade_ms=50), self.target.explosion
+                # print self.target.explosion.play(fade_ms=50), self.target.explosion
             self.parent.active_attacks.remove(self)
         else:
             self.pos = self.pos + (delta * (time_passed * self.speed) / delta.get_length())
