@@ -45,15 +45,14 @@ class TabPanel(wx.Panel):
         self.SetSizer(sizer)
 
 class ColumnSelector(wx.Panel):
-    def __init__(self, parent, callback, substring_hint, normalization):
+    def __init__(self, parent, callback, substring_hint, normalization, callback_args=None):
         """ """
         wx.Panel.__init__(self, parent=parent)
         self.callback = callback
         self.substring_hint = substring_hint
         self.normalization = normalization
         self.sheet_idx = 0
-
-        normalization.listeners.append(self.input_file_updated)
+        self.callback_args = callback_args
 
         self.sheet_selector = wx.ComboBox(self, -1, choices=[], style=wx.CB_READONLY)
         self.column_selector = wx.ComboBox(self, -1, choices=[], style=wx.CB_READONLY)
@@ -65,6 +64,10 @@ class ColumnSelector(wx.Panel):
 
         self.sheet_selector.Bind(wx.EVT_COMBOBOX, self.select_sheet)
         self.column_selector.Bind(wx.EVT_COMBOBOX, self.select_column)
+
+        normalization.listeners.append(self.input_file_updated)
+        if normalization.input_file:
+            self.input_file_updated()
 
     def input_file_updated(self):
         # find sheet and column names
@@ -95,7 +98,8 @@ class ColumnSelector(wx.Panel):
         colidx = evt.GetSelection()
         self.callback((self.sheet_idx, colidx,
                        self.normalization.book.sheet_names()[self.sheet_idx],
-                       self.normalization.book.sheet_by_index(self.sheet_idx).row(0)[colidx]))
+                       self.normalization.book.sheet_by_index(self.sheet_idx).row(0)[colidx]),
+                      *self.callback_args)
 
  
 class Normalization(object):
@@ -253,7 +257,7 @@ class PlateLayout(wx.Panel):
 
         status_box = wx.StaticBox(self, wx.ID_ANY, 'Status')
         status_sizer = wx.StaticBoxSizer(status_box, wx.VERTICAL)
-        self.status_text = wx.StaticText(self, -1, "Choose settings...")
+        self.status_text = wx.StaticText(self, -1, "Choose settings above...")
         status_sizer.Add(self.status_text, 0, wx.EXPAND)
 
         wells_combined.Value = True
@@ -438,6 +442,7 @@ class Controls(wx.Panel):
 
         panel = wx.Panel(self.scroll_window, -1)
         panel.BackgroundColour = "light blue"
+        # XXX - this should be outside the scrolled area.
         self.row_sizer.Add(make_row(panel,
                                     wx.StaticText(panel, -1, "Gene Name"),
                                     wx.StaticText(panel, -1, "Count"),
@@ -448,7 +453,7 @@ class Controls(wx.Panel):
 
         for idx, (count, gene) in enumerate(countgenes):
             panel = wx.Panel(self.scroll_window, -1)
-            panel.BackgroundColour = "grey" if (idx % 2) else "white"
+            panel.BackgroundColour = "light grey" if (idx % 2) else "white"
             self.row_sizer.Add(make_row(panel,
                                         wx.StaticText(panel, -1, gene),
                                         wx.StaticText(panel, -1, "%d"%(count)),
@@ -462,6 +467,57 @@ class Controls(wx.Panel):
 
         self.row_sizer.Layout()
         self.scroll_window.VirtualSize = self.scroll_window.BestVirtualSize
+
+class Feature(wx.Panel):
+    def __init__(self, parent, normalization):
+        wx.Panel.__init__(self, parent=parent)
+        self.normalization = normalization
+        self.num_replicates = 1
+        normalization.num_replicates = self.num_replicates
+
+        feature_column_box = wx.StaticBox(self, wx.ID_ANY, 'Feature column for first replicate')
+        self.feature_column_sizer = wx.StaticBoxSizer(feature_column_box, wx.VERTICAL)
+        feature_column_selector = ColumnSelector(self, self.set_feature_column, '---', self.normalization, callback_args=(0,))
+        self.feature_column_sizer.Add(feature_column_selector, 0, wx.EXPAND)
+        self.feature_column_sizer.Add((1,10), 1)
+        
+        add_replicate_button = wx.Button(self, label="Add Replicate")
+        remove_replicate_button = wx.Button(self, label="Remove Last Replicate")
+        button_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        button_sizer.Add(add_replicate_button, 0)
+        button_sizer.Add((10,1), 0)
+        button_sizer.Add(remove_replicate_button, 0)
+        button_sizer.Add((1,1), 2)                         
+
+        add_replicate_button.Bind(wx.EVT_BUTTON, self.add_replicate)
+        remove_replicate_button.Bind(wx.EVT_BUTTON, self.remove_replicate)
+        
+        self.feature_column_sizer.Add(button_sizer, 0, wx.EXPAND)
+
+        self.topsizer = sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(self.feature_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        self.SetSizer(sizer)
+
+    def set_feature_column(self, val, replicate_index):
+        pass
+
+    def add_replicate(self, evt):
+        feature_column_selector = ColumnSelector(self, self.set_feature_column, '---', self.normalization, callback_args=(self.num_replicates,))
+        self.feature_column_sizer.Insert(self.num_replicates * 2, feature_column_selector, 0, wx.EXPAND)
+        self.feature_column_sizer.Insert(self.num_replicates * 2 + 1, (1, 10), 0)
+        self.num_replicates += 1
+        normalization.num_replicates = self.num_replicates
+        self.Layout()
+
+    def remove_replicate(self, evt):
+        if self.num_replicates == 1:
+            return
+        self.num_replicates -= 1
+        win = self.feature_column_sizer.Children[self.num_replicates * 2].GetWindow()
+        self.feature_column_sizer.Detach(self.num_replicates * 2)
+        self.feature_column_sizer.Detach(self.num_replicates * 2)
+        win.Destroy()
+        self.Layout()
 
 class Frame(wx.Frame):
     def __init__(self, title, normalization):
@@ -489,6 +545,8 @@ class Frame(wx.Frame):
         notebook.AddPage(DataInputOutput(notebook, self.normalization), "Data Input/Output")
         notebook.AddPage(PlateLayout(notebook, self.normalization), "Plate Layout")
         notebook.AddPage(Controls(notebook, self.normalization), "Controls")
+        notebook.AddPage(Feature(notebook, self.normalization), "Feature")
+
 
         tabTwo = TabPanel(notebook)
         notebook.AddPage(tabTwo, "Normalization")
