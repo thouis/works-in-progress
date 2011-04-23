@@ -437,7 +437,10 @@ def run_game():
         'bonehunter2.png', 
         'skorpio.png',
         'tuma.png', 
-        'skrals.png']
+        'skrals.png',
+        'stronius1.png',
+        'stronius2.png',
+        'metus_with_guards.png']
     TOWER_FILENAMES = [
         'matanui.png',
         'malum.png',
