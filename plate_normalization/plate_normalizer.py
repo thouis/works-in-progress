@@ -6,6 +6,7 @@ import random
 import os.path
 import xlrd
 from welltools import extract_row, extract_col
+from wxplotpanel import PlotPanel
 
 app_name = "Plate Normalizer"
 aboutText = """<p>Plate normalizer v0.1.</p>""" 
@@ -45,7 +46,7 @@ class TabPanel(wx.Panel):
         self.SetSizer(sizer)
 
 class ColumnSelector(wx.Panel):
-    def __init__(self, parent, callback, substring_hint, normalization, callback_args=None):
+    def __init__(self, parent, callback, substring_hint, normalization, callback_args=[]):
         """ """
         wx.Panel.__init__(self, parent=parent)
         self.callback = callback
@@ -158,7 +159,9 @@ class Normalization(object):
         
     def fetch_genes(self):
         return self.get_column_values(self.gene_column)
-        
+
+    def ready(self):
+        return False
 
     
 
@@ -519,9 +522,66 @@ class Feature(wx.Panel):
         win.Destroy()
         self.Layout()
 
+class OriginalPlot(PlotPanel):
+    def __init__(self, parent, normalization, **kwargs):
+        self.normalization = normalization
+        self.parent = parent
+        # initiate plotter
+        PlotPanel.__init__(self, parent, **kwargs)
+
+    def draw(self):
+        if not hasattr( self, 'subplot' ):
+            self.subplot = self.figure.add_subplot(111)
+        print "in draw orig"
+        self.subplot.cla()
+        if normalization.ready():
+            self.subplot.hist(self.normalization.get_data(0), 20)
+            self.subplot.title('original')
+        else:
+            self.subplot.annotate('waiting', (0, 0))
+            self.subplot.plot([1,1,-1,-1], [1,-1,1,-1])
+            self.subplot.axis('tight')
+
+class CleanedPlot(PlotPanel):
+    def __init__(self, parent, normalization, **kwargs):
+        self.normalization = normalization
+        self.parent = parent
+        # initiate plotter
+        PlotPanel.__init__(self, parent, **kwargs)
+
+    def draw(self):
+        print "in draw", self.Size
+        if not hasattr( self, 'subplot' ):
+            self.subplot = self.figure.add_subplot(111)
+        self.subplot.cla()
+        if normalization.ready():
+            self.subplot.hist(self.normalization.get_data(0), 20)
+            self.subplot.title('cleaned')
+        else:
+            self.subplot.annotate('waiting', (0, 0))
+
+
+class Plots(wx.Panel):
+    def __init__(self, parent, normalization):
+        wx.Panel.__init__(self, parent=parent)
+        self.normalization = normalization
+        self.panels = {}
+
+        self.panels['original data'] = OriginalPlot(self, 'red')
+        self.panels['cleaned data'] = CleanedPlot(self, 'green')
+        
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(self.panels['original data'], 1, wx.ALL | wx.EXPAND, 5)
+        sizer.Add(self.panels['cleaned data'], 1, wx.ALL | wx.EXPAND, 5)
+
+        self.SetSizer(sizer)
+        self.Layout()
+
+    
+
 class Frame(wx.Frame):
     def __init__(self, title, normalization):
-        wx.Frame.__init__(self, None, title=title, size=(450,300))
+        wx.Frame.__init__(self, None, title=title, size=(600,300))
         self.normalization = normalization
         self.appname = title
 
@@ -547,9 +607,10 @@ class Frame(wx.Frame):
         notebook.AddPage(Controls(notebook, self.normalization), "Controls")
         notebook.AddPage(Feature(notebook, self.normalization), "Feature")
 
-
         tabTwo = TabPanel(notebook)
         notebook.AddPage(tabTwo, "Normalization")
+        
+        notebook.AddPage(Plots(notebook, self.normalization), "Plots")
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(notebook, 1, wx.ALL|wx.EXPAND, 5)
