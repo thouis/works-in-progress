@@ -4,14 +4,13 @@ import wx, wx.html, wx.lib.scrolledpanel
 import sys
 import random
 import os.path
-import xlrd
-from welltools import extract_row, extract_col
-from wxplotpanel import PlotPanel
+from normalization import Normalization, DETECT
+import wxplotpanel
+import traceback
+import numpy as np
 
 app_name = "Plate Normalizer"
-aboutText = """<p>Plate normalizer v0.1.</p>""" 
-
-DETECT = 'Detect'
+aboutText = """<p>Plate normalizer v0.1.</p>"""
 
 class HtmlWindow(wx.html.HtmlWindow):
     def __init__(self, parent, id, size=(600,400)):
@@ -19,7 +18,7 @@ class HtmlWindow(wx.html.HtmlWindow):
 
     def OnLinkClicked(self, link):
         wx.LaunchDefaultBrowser(link.GetHref())
-        
+
 class AboutBox(wx.Dialog):
     def __init__(self):
         wx.Dialog.__init__(self, None, -1, "About...",
@@ -36,10 +35,10 @@ class TabPanel(wx.Panel):
     def __init__(self, parent, *args):
         """ """
         wx.Panel.__init__(self, parent=parent)
- 
+
         colors = ["red", "blue", "gray", "yellow", "green"]
         self.SetBackgroundColour(random.choice(colors))
- 
+
         btn = wx.Button(self, label="Press Me")
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(btn, 0, wx.ALL, 10)
@@ -66,7 +65,7 @@ class ColumnSelector(wx.Panel):
         self.sheet_selector.Bind(wx.EVT_COMBOBOX, self.select_sheet)
         self.column_selector.Bind(wx.EVT_COMBOBOX, self.select_column)
 
-        normalization.listeners.append(self.input_file_updated)
+        normalization.file_listeners.append(self.input_file_updated)
         if normalization.input_file:
             self.input_file_updated()
 
@@ -74,7 +73,7 @@ class ColumnSelector(wx.Panel):
         # find sheet and column names
         self.sheet_selector.Clear()
         self.sheet_selector.AppendItems(self.normalization.book.sheet_names())
-        
+
     def select_sheet(self, evt):
         sheet_idx = evt.GetSelection()
         self.sheet_idx = sheet_idx
@@ -102,68 +101,6 @@ class ColumnSelector(wx.Panel):
                        self.normalization.book.sheet_by_index(self.sheet_idx).row(0)[colidx]),
                       *self.callback_args)
 
- 
-class Normalization(object):
-    '''This object communicates the parameters (including input and output files) for a normalization'''
-    def __init__(self):
-        self.input_file = ''
-        self.output_file = ''
-        self.shape = DETECT
-        self.plate_column = ()
-        self.well_column = ()
-        self.wellrow_column = ()
-        self.wellcol_column = ()
-        self.combined_wellrowcol = True
-        self.gene_column = ()
-
-        self.listeners = []
-        self.parsing_listeners = []
-    
-    def set_input_file(self, val):
-        self.input_file = val
-        try:
-            self.book = xlrd.open_workbook(self.input_file)
-            self.update_listeners()
-        except:
-            # XXX - report error
-            pass
-
-    def update_listeners(self):
-        for f in self.listeners:
-            f()
-
-    def parsing_finished(self):
-        for f in self.parsing_listeners:
-            f()
-
-    
-    def get_column_values(self, column_specifier):
-        # import pdb
-        # pdb.set_trace()
-        return [cell.value for cell in self.book.sheet_by_index(column_specifier[0]).col(column_specifier[1])[1:]]
-
-    def fetch_plates(self):
-        return self.get_column_values(self.plate_column)
-
-    def fetch_rows(self):
-        if self.combined_wellrowcol:
-            return [extract_row(v) for v in self.get_column_values(self.well_column)]
-        else:
-            return self.get_column_values(self.wellrow_column)
-        
-    def fetch_cols(self):
-        if self.combined_wellrowcol:
-            return [extract_col(v) for v in self.get_column_values(self.well_column)]
-        else:
-            return self.get_column_values(self.wellcol_column)
-        
-    def fetch_genes(self):
-        return self.get_column_values(self.gene_column)
-
-    def ready(self):
-        return False
-
-    
 
 class DataInputOutput(wx.Panel):
     def __init__(self, parent, normalization):
@@ -172,7 +109,7 @@ class DataInputOutput(wx.Panel):
 
         input_box = wx.StaticBox(self, wx.ID_ANY, 'Input')
         output_box = wx.StaticBox(self, wx.ID_ANY, 'Output')
-        
+
         input_sizer = wx.StaticBoxSizer(input_box, wx.VERTICAL)
         self.input_text = wx.TextCtrl(self, -1, normalization.input_file, style=wx.TE_RIGHT)
         input_browse = wx.Button(self, label="Browse")
@@ -193,7 +130,7 @@ class DataInputOutput(wx.Panel):
         input_browse.Bind(wx.EVT_BUTTON, self.browse_input)
         output_browse.Bind(wx.EVT_BUTTON, self.browse_output)
 
-        self.normalization.listeners.append(self.update_files)
+        self.normalization.file_listeners.append(self.update_files)
         # TODO - handle text editing
 
     def browse_input(self, evt):
@@ -266,7 +203,7 @@ class PlateLayout(wx.Panel):
         wells_combined.Value = True
         self.well_column_sizer.Hide(self.wellrow_selector)
         self.well_column_sizer.Hide(self.wellcol_selector)
-        
+
         shapeb1.Bind(wx.EVT_RADIOBUTTON, self.set_shape)
         shapeb2.Bind(wx.EVT_RADIOBUTTON, self.set_shape)
         shapeb3.Bind(wx.EVT_RADIOBUTTON, self.set_shape)
@@ -281,7 +218,7 @@ class PlateLayout(wx.Panel):
         sizer.Add(gene_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(status_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(sizer)
-    
+
     def set_shape(self, evt):
         self.normalization.shape = evt.EventObject.Label
         self.preflight()
@@ -296,7 +233,7 @@ class PlateLayout(wx.Panel):
     def set_well_column(self, val):
         self.normalization.well_column = val
         self.preflight()
-    
+
     def set_wellrow_column(self, val):
         self.normalization.wellrow_column = val
         self.preflight()
@@ -341,7 +278,8 @@ class PlateLayout(wx.Panel):
             for rowidx, (plate, row, col, gene) in enumerate(current_data):
                 # XXX - should we allow empty genes?
                 if plate == '':
-                    assert row == col == gene == '', "Incomplete data at row %d (plate = '%s', row = '%s', col = '%s', gene = '%s')"%(rowidx + 1, plate, row, col, gene)
+                    # +2 because rowidx is 0-based, plus one for the head.
+                    assert row == col == gene == '', "Incomplete data at row %d (plate = '%s', row = '%s', col = '%s', gene = '%s')"%(rowidx + 2, plate, row, col, gene)
                     continue
                 if self.normalization.shape == '96':
                     assert row in 'ABCDEFGH', "Bad row for 96 well plate - '%s' at spreadsheet row %d'"%(row, rowidx + 1)
@@ -357,6 +295,7 @@ class PlateLayout(wx.Panel):
 
 
             # XXX - check multiple plates for matching well/gene information
+            # XXX - check uniqueness of wells (plate, row, col)
 
             # count number of plates, wells, and wells per gene
             self.valid = True
@@ -365,6 +304,7 @@ class PlateLayout(wx.Panel):
             if plate_shape == DETECT:
                 plate_shape = "384" if self.detected_384 else "96"
                 autodetected = " (autodetected)"
+                self.normalization.detected_384 = self.detected_384
 
             if min(wells_per_plate.values()) == max(wells_per_plate.values()):
                 plate_counts_text = "Wells per plate: %d"%(wells_per_plate.values()[0])
@@ -382,7 +322,7 @@ class PlateLayout(wx.Panel):
                                 "Number of plates: %d"%(len(wells_per_plate)),
                                 plate_counts_text,
                                 gene_counts_text])
-                      
+
             self.normalization.gene_counts = gene_counts
             self.status_text.Label = status
             self.topsizer.Layout()
@@ -421,13 +361,13 @@ class Controls(wx.Panel):
         self.Layout()
 
         self.normalization.parsing_listeners.append(self.update)
-        
+
     def update(self):
         print "updating Controls panel"
         # populate with genes, counts, radiobuttons
         self.row_controls = []
         self.row_sizer.DeleteWindows()
-        
+
         def make_row(panel, g, c, t, n, p):
             self.row_controls.append([g, c, t, n, p])
             sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -456,7 +396,7 @@ class Controls(wx.Panel):
 
         for idx, (count, gene) in enumerate(countgenes):
             panel = wx.Panel(self.scroll_window, -1)
-            panel.BackgroundColour = "light grey" if (idx % 2) else "white"
+            # panel.BackgroundColour = "white" if (idx % 5) else "light grey"
             self.row_sizer.Add(make_row(panel,
                                         wx.StaticText(panel, -1, gene),
                                         wx.StaticText(panel, -1, "%d"%(count)),
@@ -464,6 +404,9 @@ class Controls(wx.Panel):
                                         wx.RadioButton(panel, -1),
                                         wx.RadioButton(panel, -1)),
                                0, wx.EXPAND)
+            if idx % 5 == 4:
+                self.row_sizer.Add(wx.StaticLine(self.scroll_window), 0, wx.EXPAND | wx.ALL, 1)
+
 
         for g, c, t, n, p in self.row_controls[1:]:
             t.Value = True
@@ -478,23 +421,23 @@ class Feature(wx.Panel):
         self.num_replicates = 1
         normalization.num_replicates = self.num_replicates
 
-        feature_column_box = wx.StaticBox(self, wx.ID_ANY, 'Feature column for first replicate')
+        feature_column_box = wx.StaticBox(self, wx.ID_ANY, 'Feature columns for each replicate')
         self.feature_column_sizer = wx.StaticBoxSizer(feature_column_box, wx.VERTICAL)
         feature_column_selector = ColumnSelector(self, self.set_feature_column, '---', self.normalization, callback_args=(0,))
         self.feature_column_sizer.Add(feature_column_selector, 0, wx.EXPAND)
         self.feature_column_sizer.Add((1,10), 1)
-        
+
         add_replicate_button = wx.Button(self, label="Add Replicate")
         remove_replicate_button = wx.Button(self, label="Remove Last Replicate")
         button_sizer = wx.BoxSizer(wx.HORIZONTAL)
         button_sizer.Add(add_replicate_button, 0)
         button_sizer.Add((10,1), 0)
         button_sizer.Add(remove_replicate_button, 0)
-        button_sizer.Add((1,1), 2)                         
+        button_sizer.Add((1,1), 2)
 
         add_replicate_button.Bind(wx.EVT_BUTTON, self.add_replicate)
         remove_replicate_button.Bind(wx.EVT_BUTTON, self.remove_replicate)
-        
+
         self.feature_column_sizer.Add(button_sizer, 0, wx.EXPAND)
 
         self.topsizer = sizer = wx.BoxSizer(wx.VERTICAL)
@@ -502,82 +445,123 @@ class Feature(wx.Panel):
         self.SetSizer(sizer)
 
     def set_feature_column(self, val, replicate_index):
-        pass
+        self.normalization.set_replicate_feature(replicate_index, val)
 
     def add_replicate(self, evt):
         feature_column_selector = ColumnSelector(self, self.set_feature_column, '---', self.normalization, callback_args=(self.num_replicates,))
         self.feature_column_sizer.Insert(self.num_replicates * 2, feature_column_selector, 0, wx.EXPAND)
         self.feature_column_sizer.Insert(self.num_replicates * 2 + 1, (1, 10), 0)
         self.num_replicates += 1
-        normalization.num_replicates = self.num_replicates
+        self.normalization.num_replicates = self.num_replicates
         self.Layout()
 
     def remove_replicate(self, evt):
         if self.num_replicates == 1:
             return
         self.num_replicates -= 1
+        self.normalization.num_replicates = self.num_replicates
         win = self.feature_column_sizer.Children[self.num_replicates * 2].GetWindow()
         self.feature_column_sizer.Detach(self.num_replicates * 2)
         self.feature_column_sizer.Detach(self.num_replicates * 2)
         win.Destroy()
         self.Layout()
 
-class OriginalPlot(PlotPanel):
+class Normalization(wx.Panel):
+    def __init__(self, parent, normalization):
+        wx.Panel.__init__(self, parent=parent)
+        self.normalization = normalization
+
+
+class Plot(wxplotpanel.PlotPanel):
+    ''' shared superclass with common __init__ '''
     def __init__(self, parent, normalization, **kwargs):
         self.normalization = normalization
         self.parent = parent
-        # initiate plotter
-        PlotPanel.__init__(self, parent, **kwargs)
+        # initiate plot window
+        wxplotpanel.PlotPanel.__init__(self, parent, **kwargs)
 
     def draw(self):
-        if not hasattr( self, 'subplot' ):
-            self.subplot = self.figure.add_subplot(111)
-        print "in draw orig"
-        self.subplot.cla()
-        if normalization.ready():
-            self.subplot.hist(self.normalization.get_data(0), 20)
-            self.subplot.title('original')
+        self.figure.clear()
+        if not self.normalization.ready():
+            subplot = self.figure.add_subplot(111)
+            subplot.annotate('waiting\nfor settings...', (0, 0),
+                             horizontalalignment='center',
+                             multialignment='center')
+            subplot.axis([-1, 1, -1, 1])
         else:
-            self.subplot.annotate('waiting', (0, 0))
-            self.subplot.plot([1,1,-1,-1], [1,-1,1,-1])
-            self.subplot.axis('tight')
+            self.do_draw()
 
-class CleanedPlot(PlotPanel):
-    def __init__(self, parent, normalization, **kwargs):
-        self.normalization = normalization
-        self.parent = parent
-        # initiate plotter
-        PlotPanel.__init__(self, parent, **kwargs)
+class OriginalHistograms(Plot):
+    def do_draw(self):
+        self.figure.suptitle('original')
+        for rep in range(self.normalization.num_replicates):
+            subplot = self.figure.add_subplot(self.normalization.num_replicates, 1, rep)
+            subplot.hist(self.normalization.get_replicate_data(rep), 20)
 
-    def draw(self):
-        print "in draw", self.Size
-        if not hasattr( self, 'subplot' ):
-            self.subplot = self.figure.add_subplot(111)
-        self.subplot.cla()
-        if normalization.ready():
-            self.subplot.hist(self.normalization.get_data(0), 20)
-            self.subplot.title('cleaned')
-        else:
-            self.subplot.annotate('waiting', (0, 0))
+class OriginalPlates(Plot):
+    def do_draw(self):
+        self.figure.suptitle('original')
+        plotidx = 0
+        for plate_name in self.normalization.plate_names():
+            for rep in range(self.normalization.num_replicates):
+                plotidx += 1
+                subplot = self.figure.add_subplot(self.normalization.num_plates(), self.normalization.num_replicates, plotidx)
+                try:
+                    subplot.matshow(self.normalization.plate_array(plate_name, rep))
+                except:
+                    print plate_name, rep
+                    traceback.print_exc()
+                    pass
+                subplot.set_title(plate_name)
+
+class CleanedPlot(Plot):
+    def do_draw(self):
+        self.figure.suptitle('cleaned')
+        subplot = self.figure.add_subplot(self.normalization.num_replicates, 1, 0)
+        subplot.hist(self.normalization.get_replicate_data(0), 20)
 
 
 class Plots(wx.Panel):
     def __init__(self, parent, normalization):
         wx.Panel.__init__(self, parent=parent)
+
         self.normalization = normalization
+
+        self.scroll_window = wx.lib.scrolledpanel.ScrolledPanel(self, -1)
+        self.subpanel = subpanel = wx.Panel(self.scroll_window, -1)
         self.panels = {}
+        self.panels['original data'] = OriginalHistograms(subpanel, normalization, color=(255,255,255))
+        self.panels['original platemaps'] = OriginalPlates(subpanel, normalization, color=(255,255,255))
+        self.panels['cleaned data'] = CleanedPlot(subpanel, normalization, color=(255,255,255))
 
-        self.panels['original data'] = OriginalPlot(self, 'red')
-        self.panels['cleaned data'] = CleanedPlot(self, 'green')
-        
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(self.panels['original data'], 1, wx.ALL | wx.EXPAND, 5)
-        sizer.Add(self.panels['cleaned data'], 1, wx.ALL | wx.EXPAND, 5)
+        sizer.Add(self.panels['original data'], 1, wx.ALL | wx.EXPAND, 1)
+        sizer.Add(self.panels['original platemaps'], 1, wx.ALL | wx.EXPAND, 1)
+        sizer.Add(self.panels['cleaned data'], 1, wx.ALL | wx.EXPAND, 1)
+        subpanel.SetSizer(sizer)
 
-        self.SetSizer(sizer)
+        self.scroll_window.SetupScrolling(False, True)
+
+        top_sizer = wx.BoxSizer(wx.VERTICAL)
+        top_sizer.Add(self.scroll_window, 1, wx.EXPAND)
+        self.SetSizer(top_sizer)
         self.Layout()
 
-    
+        self.Bind(wx.EVT_SIZE, self.on_size)
+
+        normalization.feature_selection_listeners.append(self.update_plots)
+
+    def update_plots(self):
+        for p in self.panels.values():
+            p.draw()
+
+    def on_size(self, evt):
+        height = self.scroll_window.ClientSize[1]
+        width = int(height / np.sqrt(2))
+        self.subpanel.Size = (width, height * len(self.panels))
+        self.scroll_window.VirtualSize = self.subpanel.Size
+        # center sub panel
+        self.subpanel.Position = ((self.scroll_window.Size[0] - self.subpanel.Size[0]) / 2, 0)
 
 class Frame(wx.Frame):
     def __init__(self, title, normalization):
@@ -599,17 +583,14 @@ class Frame(wx.Frame):
         self.statusbar = self.CreateStatusBar()
 
         panel = wx.Panel(self)
-        
+
         notebook = wx.Notebook(panel)
 
         notebook.AddPage(DataInputOutput(notebook, self.normalization), "Data Input/Output")
         notebook.AddPage(PlateLayout(notebook, self.normalization), "Plate Layout")
         notebook.AddPage(Controls(notebook, self.normalization), "Controls")
         notebook.AddPage(Feature(notebook, self.normalization), "Feature")
-
-        tabTwo = TabPanel(notebook)
-        notebook.AddPage(tabTwo, "Normalization")
-        
+        notebook.AddPage(Normalization(notebook, self.normalization), "Normalization")
         notebook.AddPage(Plots(notebook, self.normalization), "Plots")
 
         sizer = wx.BoxSizer(wx.VERTICAL)
@@ -622,7 +603,7 @@ class Frame(wx.Frame):
 
 
     def on_close(self, event):
-        dlg = wx.MessageDialog(self, 
+        dlg = wx.MessageDialog(self,
             "Do you really want to close this application?",
             "Confirm Exit", wx.OK|wx.CANCEL|wx.ICON_QUESTION)
         result = dlg.ShowModal()
@@ -633,7 +614,7 @@ class Frame(wx.Frame):
     def on_about(self, event):
         dlg = AboutBox()
         dlg.ShowModal()
-        dlg.Destroy()  
+        dlg.Destroy()
 
     def update_title(self):
         title = self.appname
@@ -645,7 +626,7 @@ class Frame(wx.Frame):
 
 
 normalization = Normalization()
-app = wx.App(redirect=False) 
+app = wx.App(redirect=False)
 top = Frame(app_name, normalization)
 if len(sys.argv) > 1:
     normalization.set_input_file(sys.argv[1])
