@@ -102,61 +102,17 @@ class ColumnSelector(wx.Panel):
                       *self.callback_args)
 
 
-class DataInputOutput(wx.Panel):
+class PlateLayout(wx.Panel):
     def __init__(self, parent, normalization):
         wx.Panel.__init__(self, parent=parent)
         self.normalization = normalization
 
         input_box = wx.StaticBox(self, wx.ID_ANY, 'Input')
-        output_box = wx.StaticBox(self, wx.ID_ANY, 'Output')
-
         input_sizer = wx.StaticBoxSizer(input_box, wx.VERTICAL)
         self.input_text = wx.TextCtrl(self, -1, normalization.input_file, style=wx.TE_RIGHT)
         input_browse = wx.Button(self, label="Browse")
         input_sizer.Add(self.input_text, 0, wx.EXPAND)
         input_sizer.Add(input_browse, 0, wx.ALIGN_RIGHT | wx.TOP, 5)
-
-        output_sizer = wx.StaticBoxSizer(output_box, wx.VERTICAL)
-        self.output_text = wx.TextCtrl(self, -1, normalization.output_file)
-        output_browse = wx.Button(self, label="Browse")
-        output_sizer.Add(self.output_text, 0, wx.EXPAND)
-        output_sizer.Add(output_browse, 0, wx.ALIGN_RIGHT | wx.TOP, 5)
-
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(input_sizer, 0, wx.ALL | wx.EXPAND, 10)
-        sizer.Add(output_sizer, 0, wx.ALL | wx.EXPAND, 10)
-        self.SetSizer(sizer)
-
-        input_browse.Bind(wx.EVT_BUTTON, self.browse_input)
-        output_browse.Bind(wx.EVT_BUTTON, self.browse_output)
-
-        self.normalization.file_listeners.append(self.update_files)
-        # TODO - handle text editing
-
-    def browse_input(self, evt):
-        dlg = wx.FileDialog(self, "Choose an input file (.XLS)", wildcard="*.xls", style=wx.OPEN)
-        if dlg.ShowModal() == wx.ID_OK:
-            self.normalization.set_input_file(dlg.GetPath())
-            self.update_files()
-        dlg.Destroy()
-
-    def browse_output(self, evt):
-        dlg = wx.FileDialog(self, "Choose an output file (.XLS)", wildcard="*.xls", style=wx.SAVE|wx.FD_OVERWRITE_PROMPT)
-        if dlg.ShowModal() == wx.ID_OK:
-            self.normalization.output_file = dlg.GetPath()
-            self.update_files()
-        dlg.Destroy()
-
-    def update_files(self):
-        # should check existence, possibly pre-parse
-        self.input_text.Value = self.normalization.input_file
-        self.output_text.Value = self.normalization.output_file
-        self.TopLevelParent.update_title()
-
-class PlateLayout(wx.Panel):
-    def __init__(self, parent, normalization):
-        wx.Panel.__init__(self, parent=parent)
-        self.normalization = normalization
 
         shape_box = wx.StaticBox(self, wx.ID_ANY, 'Plate shape')
         shape_sizer = wx.StaticBoxSizer(shape_box, wx.HORIZONTAL)
@@ -204,6 +160,7 @@ class PlateLayout(wx.Panel):
         self.well_column_sizer.Hide(self.wellrow_selector)
         self.well_column_sizer.Hide(self.wellcol_selector)
 
+        input_browse.Bind(wx.EVT_BUTTON, self.browse_input)
         shapeb1.Bind(wx.EVT_RADIOBUTTON, self.set_shape)
         shapeb2.Bind(wx.EVT_RADIOBUTTON, self.set_shape)
         shapeb3.Bind(wx.EVT_RADIOBUTTON, self.set_shape)
@@ -212,12 +169,26 @@ class PlateLayout(wx.Panel):
         wells_separate.Bind(wx.EVT_RADIOBUTTON, self.set_wells_combined)
 
         self.topsizer = sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(input_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(shape_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(plate_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(self.well_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(gene_column_sizer, 0, wx.ALL | wx.EXPAND, 5)
         sizer.Add(status_sizer, 0, wx.ALL | wx.EXPAND, 5)
         self.SetSizer(sizer)
+
+    # XXX - handle text field editing
+    def browse_input(self, evt):
+        dlg = wx.FileDialog(self, "Choose an input file (.XLS)", wildcard="*.xls", style=wx.OPEN)
+        if dlg.ShowModal() == wx.ID_OK:
+            self.normalization.set_input_file(dlg.GetPath())
+            self.update_files()
+        dlg.Destroy()
+
+    def update_files(self):
+        # should check existence, possibly pre-parse
+        self.input_text.Value = self.normalization.input_file
+        self.TopLevelParent.update_title()
 
     def set_shape(self, evt):
         self.normalization.shape = evt.EventObject.Label
@@ -466,7 +437,7 @@ class Feature(wx.Panel):
         win.Destroy()
         self.Layout()
 
-class Normalization(wx.Panel):
+class NormalizationParams(wx.Panel):
     def __init__(self, parent, normalization):
         wx.Panel.__init__(self, parent=parent)
         self.normalization = normalization
@@ -586,11 +557,10 @@ class Frame(wx.Frame):
 
         notebook = wx.Notebook(panel)
 
-        notebook.AddPage(DataInputOutput(notebook, self.normalization), "Data Input/Output")
-        notebook.AddPage(PlateLayout(notebook, self.normalization), "Plate Layout")
+        notebook.AddPage(PlateLayout(notebook, self.normalization), "File && Layout")
         notebook.AddPage(Controls(notebook, self.normalization), "Controls")
         notebook.AddPage(Feature(notebook, self.normalization), "Feature")
-        notebook.AddPage(Normalization(notebook, self.normalization), "Normalization")
+        notebook.AddPage(NormalizationParams(notebook, self.normalization), "Parameters")
         notebook.AddPage(Plots(notebook, self.normalization), "Plots")
 
         sizer = wx.BoxSizer(wx.VERTICAL)
@@ -599,8 +569,6 @@ class Frame(wx.Frame):
 
         self.Layout()
         self.Bind(wx.EVT_CLOSE, self.on_close)
-
-
 
     def on_close(self, event):
         dlg = wx.MessageDialog(self,
@@ -626,9 +594,9 @@ class Frame(wx.Frame):
 
 
 normalization = Normalization()
-app = wx.App(redirect=False)
-top = Frame(app_name, normalization)
 if len(sys.argv) > 1:
     normalization.set_input_file(sys.argv[1])
+app = wx.App(redirect=False)
+top = Frame(app_name, normalization)
 top.Show()
 app.MainLoop()
