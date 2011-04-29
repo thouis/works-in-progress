@@ -4,7 +4,7 @@ import wx, wx.html, wx.lib.scrolledpanel
 import sys
 import random
 import os.path
-from normalization import Normalization, DETECT
+from normalization import Normalization, DETECT, TRANSFORMATIONS
 import wxplotpanel
 import traceback
 import numpy as np
@@ -437,10 +437,31 @@ class Feature(wx.Panel):
         win.Destroy()
         self.Layout()
 
-class NormalizationParams(wx.Panel):
+class Parameters(wx.Panel):
     def __init__(self, parent, normalization):
         wx.Panel.__init__(self, parent=parent)
         self.normalization = normalization
+
+        transform_box = wx.StaticBox(self, wx.ID_ANY, 'Data transformation')
+        transform_sizer = wx.StaticBoxSizer(transform_box, wx.HORIZONTAL)
+        transform_buttons = ([wx.RadioButton(self, -1, TRANSFORMATIONS[0], style=wx.RB_GROUP)]
+                            + [wx.RadioButton(self, -1, label, style=wx.RB_GROUP) for label in TRANSFORMATIONS[1:]])
+        transform_sizer.Add((1,1), 1)
+        for b in transform_buttons:
+            transform_sizer.Add(b, 0)
+            transform_sizer.Add((1,1), 1)
+        transform_buttons[0].Value = 1
+
+        self.topsizer = sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(transform_sizer, 0, wx.ALL | wx.EXPAND, 5)
+        self.SetSizer(sizer)
+
+        for b in transform_buttons:
+            b.Bind(wx.EVT_RADIOBUTTON, self.update_transform)
+
+    def update_transform(self, evt):
+        normalization.set_transformation(evt.EventObject.Label)
+        print " update", evt
 
 
 class Plot(wxplotpanel.PlotPanel):
@@ -485,6 +506,40 @@ class OriginalPlates(Plot):
                     pass
                 subplot.set_title(plate_name)
 
+class TransformedHistograms(Plot):
+    def do_draw(self):
+        bad_data = False
+        for rep in range(self.normalization.num_replicates):
+            subplot = self.figure.add_subplot(self.normalization.num_replicates, 1, rep)
+            data = self.normalization.get_replicate_data(rep, transformed=True)
+            good_data = data[np.isfinite(data)]
+            if np.any(data != good_data):
+                bad_data = True
+            if len(good_data) > 0:
+                subplot.hist(good_data, 20)
+        self.figure.suptitle('transformed%s'%(' (invalid values discarded)' if bad_data else ''))
+
+class TransformedPlates(Plot):
+    def do_draw(self):
+        bad_data = False
+        plotidx = 0
+        for plate_name in self.normalization.plate_names():
+            for rep in range(self.normalization.num_replicates):
+                plotidx += 1
+                subplot = self.figure.add_subplot(self.normalization.num_plates(), self.normalization.num_replicates, plotidx)
+                try:
+                    data = self.normalization.plate_array(plate_name, rep, transformed=True)
+                    if np.any(~ np.isfinite(data)):
+                        bad_data = True
+                    subplot.matshow(data)
+                except:
+                    print plate_name, rep
+                    traceback.print_exc()
+                    pass
+                subplot.set_title(plate_name)
+        self.figure.suptitle('transformed%s'%(' (invalid values discarded)' if bad_data else ''))
+
+
 class CleanedPlot(Plot):
     def do_draw(self):
         self.figure.suptitle('cleaned')
@@ -503,11 +558,15 @@ class Plots(wx.Panel):
         self.panels = {}
         self.panels['original data'] = OriginalHistograms(subpanel, normalization, color=(255,255,255))
         self.panels['original platemaps'] = OriginalPlates(subpanel, normalization, color=(255,255,255))
+        self.panels['transformed data'] = TransformedHistograms(subpanel, normalization, color=(255,255,255))
+        self.panels['transformed platemaps'] = TransformedPlates(subpanel, normalization, color=(255,255,255))
         self.panels['cleaned data'] = CleanedPlot(subpanel, normalization, color=(255,255,255))
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self.panels['original data'], 1, wx.ALL | wx.EXPAND, 1)
         sizer.Add(self.panels['original platemaps'], 1, wx.ALL | wx.EXPAND, 1)
+        sizer.Add(self.panels['transformed data'], 1, wx.ALL | wx.EXPAND, 1)
+        sizer.Add(self.panels['transformed platemaps'], 1, wx.ALL | wx.EXPAND, 1)
         sizer.Add(self.panels['cleaned data'], 1, wx.ALL | wx.EXPAND, 1)
         subpanel.SetSizer(sizer)
 
@@ -560,7 +619,7 @@ class Frame(wx.Frame):
         notebook.AddPage(PlateLayout(notebook, self.normalization), "File && Layout")
         notebook.AddPage(Controls(notebook, self.normalization), "Controls")
         notebook.AddPage(Feature(notebook, self.normalization), "Feature")
-        notebook.AddPage(NormalizationParams(notebook, self.normalization), "Parameters")
+        notebook.AddPage(Parameters(notebook, self.normalization), "Parameters")
         notebook.AddPage(Plots(notebook, self.normalization), "Plots")
 
         sizer = wx.BoxSizer(wx.VERTICAL)

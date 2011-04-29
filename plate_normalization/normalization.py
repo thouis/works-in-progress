@@ -4,11 +4,29 @@ from welltools import extract_row, extract_col
 
 DETECT = 'Detect'
 
+TRANSFORM_NONE = 'None'
+TRANSFORM_LOGARITHM = 'Logarithm (counts)'
+TRANSFORM_LOGIT_FRACTION = 'Logit (fractions)'
+TRANSFORM_LOGIT_PERCENT = 'Logit (percentages)'
+TRANSFORMATIONS = [TRANSFORM_NONE,
+                   TRANSFORM_LOGARITHM,
+                   TRANSFORM_LOGIT_FRACTION,
+                   TRANSFORM_LOGIT_PERCENT]
+
 def safe_float(s):
     try:
         return float(s)
     except:
         return float('nan')
+
+def logit(v):
+    # make 0/1 representable, linear interpolate between 0.0001 and 0.9999
+    v = 0.0001 + v * 0.9998
+    lv = np.log(v) / np.log(1.0 - v)
+    # deal with infinities
+    lv[v <= 0.0] = - np.inf
+    lv[v >= 1.0] = np.inf
+    return lv
 
 class Normalization(object):
     '''This object communicates the parameters (including input and output files) for a normalization'''
@@ -25,6 +43,7 @@ class Normalization(object):
         self.gene_column = ()
         self.num_replicates = 0
         self.replicate_features = {}
+        self.transformation = TRANSFORMATIONS[0]
 
         self.file_listeners = []
         self.parsing_listeners = []
@@ -85,8 +104,26 @@ class Normalization(object):
         if self.ready():
             self.feature_selection_finished()
 
-    def get_replicate_data(self, repindex):
-        return [safe_float(v) for v in self.get_column_values(self.replicate_features[repindex])]
+    def set_transformation(self, trans):
+        assert trans in TRANSFORMATIONS
+        self.transformation = trans
+
+    def transform_data(self, vals):
+        if self.transformation == TRANSFORM_NONE:
+            return vals
+        elif self.transformation == TRANSFORM_LOGARITHM:
+            return np.log(vals)
+        elif self.transformation == TRANSFORM_LOGIT_FRACTION:
+            return logit(vals)
+        elif self.transformation == TRANSFORM_LOGIT_PERCENT:
+            return logit(vals / 100.0)
+
+    def get_replicate_data(self, repindex, transformed=False):
+        vals = np.array([safe_float(v) for v in self.get_column_values(self.replicate_features[repindex])])
+        if transformed:
+            vals = self.transform_data(vals)
+        print "trna", vals.min(), vals.max()
+        return vals
 
     def num_plates(self):
         return len(set(self.get_column_values(self.plate_column)))
@@ -102,14 +139,12 @@ class Normalization(object):
     def plate_dims(self):
         return (16, 24) if self.plate_shape() == "384" else (8, 12)
 
-    def plate_array(self, plate_name, repindex):
+    def plate_array(self, plate_name, repindex, transformed=False):
         plate_mask = np.array([v == plate_name for v in self.get_column_values(self.plate_column)])
         indices = plate_mask.nonzero()[0]
         rows = np.array([ord(r) - ord('A') for r in self.fetch_rows()])
         cols = np.array([int(c) - 1 for c in self.fetch_cols()])
-        vals = np.array(self.get_replicate_data(repindex))
+        vals = np.array(self.get_replicate_data(repindex, transformed))
         output = np.zeros(self.plate_dims(), np.float)
         output[rows[indices], cols[indices]] = vals[indices]
         return output
-        
-        
