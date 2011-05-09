@@ -1,6 +1,6 @@
 from numpy import *
 
-def denoise(im, U_init, tolerance=0.1, tau=0.125, tv_weight=100):
+def denoise(im, U_init, tolerance=0.001, tau=0.125, tv_weight=10):
     """ An implementation of the Rudin-Osher-Fatemi (ROF) denoising model
         using the numerical procedure presented in Eq. (11) of A. Chambolle
         (2005). Implemented using periodic boundary conditions 
@@ -26,13 +26,18 @@ def denoise(im, U_init, tolerance=0.1, tau=0.125, tv_weight=100):
     error = 1 
     iteration = 0
 
+    tolerance *= im.max()
+
     #---Main iteration
     while (error > tolerance):
         Uold = U
 
         #Gradient of primal variable
-        LyU = vstack((U[1:,:],U[0,:])) #Left translation w.r.t. the y-direction
-        LxU = hstack((U[:,1:],U.take([0],axis=1))) #Left translation w.r.t. the x-direction
+        # LyU = vstack((U[1:,:],U[0,:])) #Left translation w.r.t. the y-direction
+        # LxU = hstack((U[:,1:],U.take([0],axis=1))) #Left translation w.r.t. the x-direction
+
+        LyU = roll(U, -1, 0)
+        LxU = roll(U, -1, 1)
 
         GradUx = LxU-U #x-component of U's gradient
         GradUy = LyU-U #y-component of U's gradient
@@ -48,8 +53,13 @@ def denoise(im, U_init, tolerance=0.1, tau=0.125, tv_weight=100):
         #Then we update the primal variable
         RxPx =hstack((Px.take([-1],axis=1),Px[:,0:-1])) #Right x-translation of x-component
         RyPy = vstack((Py[-1,:],Py[0:-1,:])) #Right y-translation of y-component
+        RxPx = roll(Px, 1, 1)
+        RyPy = roll(Py, 1, 0)
         DivP = (Px-RxPx)+(Py-RyPy) #Divergence of the dual field.
         U = im + tv_weight*DivP #Update of the primal variable
+
+        dgl = sum(sqrt(GradUx**2 + GradUy**2))
+        print 1.0 / (2 * tv_weight) * sum((U-im)**2) + dgl, 
 
         #Update of error-measure
         error = linalg.norm(U-Uold)/sqrt(n*m);
@@ -62,3 +72,14 @@ def denoise(im, U_init, tolerance=0.1, tau=0.125, tv_weight=100):
     print 'Number of ROF iterations: ', iteration
     
     return U,T
+
+import pylab
+import scipy.misc
+
+lena = scipy.misc.lena()
+lena = lena.astype(float) / amax(lena)
+pylab.imshow(lena)
+pylab.gray()
+pylab.figure()
+pylab.imshow(denoise(lena, lena)[0])
+pylab.gray()

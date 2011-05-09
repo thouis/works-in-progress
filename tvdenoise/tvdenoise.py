@@ -29,12 +29,12 @@ def tvdenoise(f, lmbda, thresh=0.0001):
 
     iter = 0
     while (iter < 3) or (change > stop_at):
-        u_new = f - lmbda * discrete_div(xi)
+        u_new = f + lmbda * discrete_div(xi)
         change = np.max(np.abs(u - u_new))
         print "	", change, stop_at, 
         u = u_new
         dg = discrete_grad(u)
-        xi = proj(xi + dg * (1.0 / (80 * lmbda)))
+        xi = proj(xi + dg * (1.0 / (8 * lmbda)))
         dgl = np.sum(np.sqrt((dg**2).sum(axis=2)))
         print "obj", 1.0 / (2 * lmbda) * np.sum((u-f)**2) + dgl, dgl
         iter += 1
