@@ -1,26 +1,29 @@
 import numpy as np
 
-def discrete_div(nu):
-    # backward differences using Dirichlet boundary conditions
-    temp_i = nu[:, :, 0].copy()
-    temp_i[-1, :] = 0
-    temp_j = nu[:, :, 1].copy()
-    temp_j[:, -1] = 0
-    return temp_i - np.roll(temp_i, 1, 0) + temp_j - np.roll(temp_j, 1, 1)
+def discrete_div(vec):
+    # backward differences using Dirichlet boundary conditions.
+    # NB: the boundary conditions are assumed, and rely on
+    # vec[-1, :, 0] == 0.0 and vec[:, -1, 1] == 0.0, which is the
+    # case in the code below (nu initially is all 0, and
+    # discrete_grad(u) always fulfills this condition)
+    temp = np.sum(vec, axis=2)
+    temp[1:, :] -= vec[:-1, :, 0]
+    temp[:, 1:] -= vec[:, :-1, 1]
+    return temp
 
 def discrete_grad(u):
-    temp_i = np.roll(u, -1, 0) - u
-    temp_j = np.roll(u, -1, 1) - u
-    temp_i[-1, :] = 0
-    temp_j[:, -1] = 0
+    temp_i = np.zeros_like(u)
+    temp_j = np.zeros_like(u)
+    temp_i[:-1, :] = np.diff(u, axis=0)
+    temp_j[:, :-1] = np.diff(u, axis=1)
     return np.dstack((temp_i, temp_j))
 
-def proj(nu):
-    return nu / np.atleast_3d(np.maximum(1, np.sqrt(nu[:,:,0]**2 + nu[:,:,1]**2)))
+def proj(vec):
+    return vec / np.atleast_3d(np.maximum(1, np.sqrt(np.sum(vec**2, axis=2))))
 
-def tvdenoise(f, lmbda, thresh=0.0001):
+def tvdenoise(im, lmbda, thresh=1/512.0):
     # http://wwwcremers.in.tum.de/teaching/ss2010/vmcv2010/vmcv_ss2010_08.pdf
-    u = f
+    u = im
     xi = np.dstack((np.zeros_like(u), np.zeros_like(u)))
     nu = xi
     t = 1.0
@@ -29,14 +32,15 @@ def tvdenoise(f, lmbda, thresh=0.0001):
 
     iter = 0
     while (iter < 3) or (change > stop_at):
-        u_new = f + lmbda * discrete_div(xi)
+        u_new = im + lmbda * discrete_div(nu)
         change = np.max(np.abs(u - u_new))
-        print "	", change, stop_at, 
         u = u_new
-        dg = discrete_grad(u)
-        xi = proj(xi + dg * (1.0 / (8 * lmbda)))
-        dgl = np.sum(np.sqrt((dg**2).sum(axis=2)))
-        print "obj", 1.0 / (2 * lmbda) * np.sum((u-f)**2) + dgl, dgl
+
+        xi_new = proj(nu + discrete_grad(u) / (8 * lmbda))
+        t_new = (1 + np.sqrt(1 + 4 * t**2)) / 2
+        nu = xi_new + ((t - 1) / t_new) * (xi_new - xi)
+        xi = xi_new
+        t = t_new
         iter += 1
     return u
 
@@ -48,5 +52,5 @@ lena = lena.astype(float) / np.amax(lena)
 pylab.imshow(lena)
 pylab.gray()
 pylab.figure()
-pylab.imshow(tvdenoise(lena, 0.05))
+pylab.imshow(tvdenoise(lena, 0.01))
 pylab.gray()
