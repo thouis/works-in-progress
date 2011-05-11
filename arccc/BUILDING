@@ -1,0 +1,4 @@
+To configure a CVS checkout, run bootstap.sh
+(requires aclocal, autoconf, and automake).
+
+After configuration, run make.

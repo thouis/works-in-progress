@@ -1,0 +1,24 @@
+This is the "Arc Consistency Crossword Compiler", or arccc.
+
+To run the program:
+
+arccc <grid> <dictionary>
+
+The grid file is a block of . # or letters.  For example, a 3x3 grid
+with the top-right and bottom-left squares filled, and an 'a' in the
+center blank is given by:
+
+..#
+.a.
+#..
+
+
+The grid parser is currently not very robust.  Do not add any blank
+lines nor spaces to the file.
+
+The dictionary is just a list of words.  Currently, if a word starts
+with an uppercase letter, it is not used in filling the grid.
+
+Currently, the program prints out a working fill when it encounters
+one, but continues generating fills until killed or exhausting all
+possibilities.

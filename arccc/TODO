@@ -1,0 +1,33 @@
+tags on words and grids
+      word should be taggable as "theme" or "obscure" or "roman
+      numeral",  and constraints applied via these tags, such as
+      limiting the number of obscure words, keeping theme words in the
+      correct spaces, and only having no more than one roman numeral
+      per puzzle. 
+
+scores for words
+       scores should be attached to words, and the filler prefer
+       higher scoring words, perhaps searching for the highest scoring
+       fill.  The main use of this would be keeping the number of
+       obscure words out.
+
+latx output
+
+acrosslite input/output
+
+faster filling (always)
+
+GTK interface
+
+should be able to temporarily remove a word from the solution, and the
+solver should change things as little as possible to fix it up.
+
+smarter backtracking
+
+better grid file format (notes, etc)
+
+complete autoconfiscation
+
+randomization of generation (seedable)
+
+optimize backtracking

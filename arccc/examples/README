@@ -1,0 +1,10 @@
+These are example grids taken from various sources.
+
+metro*.grid - The Boston Metro
+tech*.grid - The MIT Tech
+times*.grid - The New York Times
+hard*.grid - modifications of some of the above to make them difficult
+             to fill.
+
+Note that the grids are not copyrighted, though of course particular
+fills are (according to the nytimes).

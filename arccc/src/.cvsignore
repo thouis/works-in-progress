@@ -1,0 +1,7 @@
+.deps
+Makefile
+Makefile.in
+arccc
+config.h
+stamp-h
+stamp-h.in
