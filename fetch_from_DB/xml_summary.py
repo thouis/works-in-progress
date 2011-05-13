@@ -282,7 +282,7 @@ def xmls_to_xls(parent_dir, xmlfiles, outfile, callback):
             rowvals['Plate'] = parse_plate(platedir)
             # prefer well row/column, but use name if they are not valid
             if int(wellrow) > 0 and int(wellcol) > 0:
-                rowvals['Well'] = '%s%02d'%('ABCDEFGH'[int(wellrow)-1], int(wellcol))
+                rowvals['Well'] = '%s%02d'%('ABCDEFGHIJKLMNOP'[int(wellrow)-1], int(wellcol))
             else:
                 rowvals['Well'] = wellname
 
