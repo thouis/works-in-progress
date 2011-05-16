@@ -4,6 +4,7 @@ import xlwt
 import wx
 import traceback
 import xml.parsers.expat
+import treeview
 
 
 class DirPanel(wx.Panel):
@@ -13,7 +14,7 @@ class DirPanel(wx.Panel):
         label = wx.StaticText(self, -1, labelstr)
         dirname = self.dirname = wx.TextCtrl(self, style=wx.TE_PROCESS_ENTER)
         choosedir = wx.Button(self, -1, 'Choose...')
-        
+
         box = wx.BoxSizer(wx.HORIZONTAL)
         box.Add(label, 0, wx.EXPAND)
         box.Add((5,5))
@@ -49,7 +50,7 @@ class FilePanel(wx.Panel):
         label = wx.StaticText(self, -1, labelstr)
         filename = self.filename = wx.TextCtrl(self)
         browse = wx.Button(self, -1, 'Choose...')
-        
+
         box = wx.BoxSizer(wx.HORIZONTAL)
         box.Add(label, 0, wx.EXPAND)
         box.Add(filename, 1, wx.EXPAND)
@@ -73,27 +74,27 @@ class FilePanel(wx.Panel):
 class NonModalWarning(wx.Frame):
     def __init__(self, warning_text):
         wx.Frame.__init__(self, None, -1, 'Warning')
-        
+
         self.text = wx.StaticText(self, -1, warning_text)
         self.okbutton = wx.Button(self, -1, 'Ok')
-        
+
         box = wx.BoxSizer(wx.VERTICAL)
         box.Add(self.text, 0, wx.EXPAND)
         box.Add(self.okbutton, 0)
-        
+
         self.okbutton.Bind(wx.EVT_BUTTON, lambda x: self.Destroy())
 
         self.SetAutoLayout(True)
         self.SetSizer(box)
         self.Center()
-        self.Layout() 
-        self.Fit()
+        self.Layout()
+        self.Size = self.BestSize
 
 class MyFrame(wx.Frame):
    def __init__(self, parent, ID, title):
        wx.Frame.__init__(self, parent, ID, title)
        self.parent_dir = parent_dir = DirPanel(self, -1, 'Parent directory of replicates ', wx.FD_OPEN)
-       self.subdirs = subdirs = wx.CheckListBox(self, -1, style=wx.LB_MULTIPLE)
+       self.subdirs = subdirs = treeview.DirTree(self, '.')
        substring_label = wx.StaticText(self, -1, 'Common string in .XML file names: ')
        self.substring = substring = wx.TextCtrl(self, -1)
        self.go_button = go_button = wx.Button(self, -1, 'Choose output file...')
@@ -101,7 +102,7 @@ class MyFrame(wx.Frame):
        substring_box = wx.BoxSizer(wx.HORIZONTAL)
        substring_box.Add(substring_label, 0, wx.EXPAND)
        substring_box.Add(substring, 1, wx.EXPAND)
-       
+
        box = wx.BoxSizer(wx.VERTICAL)
        box.Add(parent_dir, 0, wx.EXPAND)
        box.Add(subdirs, 1, wx.EXPAND)
@@ -111,30 +112,16 @@ class MyFrame(wx.Frame):
 
        bigbox = wx.BoxSizer(wx.VERTICAL)
        bigbox.Add(box, 1, wx.EXPAND | wx.ALL, 5)
-       
-       go_button.Disable()
 
-       subdirs.Bind(wx.EVT_CHECKLISTBOX, self.check_enable)
-       substring.Bind(wx.EVT_TEXT, self.check_enable)
        go_button.Bind(wx.EVT_BUTTON, self.process_xml)
-       
-       self.SetAutoLayout(True)
+
        self.SetSizer(bigbox)
        self.Center()
-       self.Layout()    
-   
+       self.Layout()
+
    def update_subdirs(self):
        dirname = self.parent_dir.dirname.Value
-       self.subdirs.Clear()
-       if os.path.isdir(dirname):
-           subdirs = sorted([s for s in os.listdir(dirname) if os.path.isdir(os.path.join(dirname, s))])
-           self.subdirs.InsertItems(subdirs, 0)
-       self.check_enable()
-
-   def check_enable(self, evt=None):
-       self.go_button.Enable(os.path.isdir(self.parent_dir.dirname.Value) and
-                             len(self.subdirs.GetChecked()) > 0 and
-                             len(self.substring.Value) > 0)
+       self.subdirs.set_directory(dirname)
 
    def process_xml(self, evt):
        try:
@@ -155,31 +142,32 @@ class MyFrame(wx.Frame):
            warn_too_many_files = []
            count = 0
            progress = wx.ProgressDialog('Finding XML files...', 'Working           ', 100, self, wx.PD_CAN_ABORT | wx.PD_APP_MODAL | wx.PD_ESTIMATED_TIME | wx.PD_ELAPSED_TIME | wx.PD_REMAINING_TIME)
-           num_subdirs = len(self.subdirs.GetChecked())
-           for subdir in [self.subdirs.GetItems()[i] for i in self.subdirs.GetChecked()]:
-               fullsubdir = os.path.join(self.parent_dir.dirname.Value, subdir)
-               platedirs = [d for d in os.listdir(fullsubdir) if os.path.isdir(os.path.join(fullsubdir, d))]
+           selected_dirs = self.subdirs.get_selected_dirs()
+           num_subdirs = len(selected_dirs)
+           for subdir in selected_dirs:
+               rel_subdir = os.path.relpath(subdir, self.parent_dir.dirname.Value)
+               _, platedirs, _ = os.walk(subdir).next()
                num_plates = len(platedirs)
                for pld in platedirs:
                    count = count + 1
                    warning = ''
                    if len(warn_no_files) > 0 or len(warn_too_many_files) > 0:
                        warning = '\nMissing or Extra XML files found! (cancel to review)'
-                   kont, skip = progress.Update(int((99.0 * min(count, num_subdirs * num_plates)) / (num_subdirs * num_plates)), 'Looking in %s'%(os.path.join(subdir, pld))+warning)
+                   kont, skip = progress.Update(int((99.0 * min(count, num_subdirs * num_plates)) / (num_subdirs * num_plates)), 'Looking in %s'%(os.path.join(rel_subdir, pld))+warning)
                    if not kont:
                        self.warn_bad_xml(warn_no_files, warn_too_many_files)
                        progress.Destroy()
                        return
                    progress.Fit()
-                   xmls = [f for f in os.listdir(os.path.join(fullsubdir, pld)) if self.substring.Value.lower() in f.lower() and f.lower().endswith('.xml')]
+                   xmls = [f for f in os.listdir(os.path.join(subdir, pld)) if self.substring.Value.lower() in f.lower() and f.lower().endswith('.xml')]
                    if len(xmls) == 0:
-                       warn_no_files += [(subdir, pld)]
+                       warn_no_files += [os.path.join(subdir, pld)]
                        continue
                    if len(xmls) > 1:
                        # take the youngest
-                       xmls = [sorted([(os.stat(os.path.join(fullsubdir, pld, x))[-2], x) for x in xmls])[-1][1]]
+                       xmls = [sorted([(os.stat(os.path.join(subdir, pld, x))[-2], x) for x in xmls])[-1][1]]
                        warn_too_many_files += [(subdir, pld, xmls)]
-                   xmlfiles += [(subdir, pld, xmls[0])]
+                   xmlfiles += [(rel_subdir, pld, xmls[0])]
            progress.Destroy()
            progress = None
            self.warn_bad_xml(warn_no_files, warn_too_many_files)
@@ -209,27 +197,27 @@ class MyFrame(wx.Frame):
            dlg.ShowModal()
            dlg.Destroy()
 
-
-       
-
    def warn_bad_xml(self, warn_no_files, warn_too_many_files):
        warn_texts = []
        if len(warn_no_files) > 0:
            warn_texts += ['These subdirectories had no matching XML files:']
-           warn_texts += ['     %s'%(os.path.join(subdir, pld)) for subdir, pld in warn_no_files]
+           warn_texts += ['     %s'%(pld) for pld in warn_no_files]
        if len(warn_too_many_files) > 0:
-           warn_texts += ['', 'These subdirectories had multiple XML files (will use youngest)']
+           warn_texts += ['', 'These subdirectories had multiple XML files (will use youngest, shown)']
            for subdir, pld, xmlnames in warn_too_many_files:
                warn_texts += ['     %s'%(os.path.join(subdir, pld))]
                warn_texts += ['          %s'%(x) for x in xmlnames]
        if len(warn_texts) > 0:
-           NonModalWarning("\n".join(warn_texts)).Show(True)
-          
+           nm = NonModalWarning("\n".join(warn_texts))
+           sz = nm.Size
+           for wt in warn_texts:
+               sz.SetWidth(max(sz.GetWidth(), nm.GetFullTextExtent(wt)[0]))
+           nm.Size = sz
+           nm.Fit()
+           nm.Show(True)
+
 # XML parsing
 
-
-
- 
 def xmls_to_xls(parent_dir, xmlfiles, outfile, callback):
     xmls_to_xls.active = False
     xmls_to_xls.rowidx = 1 # start at 1, go back and write header
@@ -261,9 +249,14 @@ def xmls_to_xls(parent_dir, xmlfiles, outfile, callback):
         return name
 
 
+    def make_sheetname(name):
+        for bad, good in zip("[]:\\?/*\x00", "().-.-.."):
+            name = name.replace(bad, good)
+        return name
+
     xmlfiles.sort()
     book = xlwt.Workbook()
-    cursheet = book.add_sheet(xmlfiles[0][0])
+    cursheet = book.add_sheet(make_sheetname(xmlfiles[0][0]))
 
     numsheets = 1
 
@@ -296,11 +289,11 @@ def xmls_to_xls(parent_dir, xmlfiles, outfile, callback):
             lookup_feature_col(feature)
             rowvals[feature] = value
 
-        if cursheet.name != subdir:
-            cursheet = book.add_sheet(subdir)
+        if cursheet.name != make_sheetname(subdir):
+            cursheet = book.add_sheet(make_sheetname(subdir))
             numsheets += 1
             xmls_to_xls.rowidx = 1 # start at 1, go back and write header
-            
+
         xmls_to_xls.active = False
         inf = open(os.path.join(parent_dir, subdir, platedir, xmlfile))
         try:
@@ -313,7 +306,7 @@ def xmls_to_xls(parent_dir, xmlfiles, outfile, callback):
         except StopParsing:
             pass
         inf.close()
-            
+
 
     # write header row
     for idx in range(numsheets):
@@ -325,7 +318,7 @@ def xmls_to_xls(parent_dir, xmlfiles, outfile, callback):
     # done
     book.save(outf)
     outf.close()
-    
+
 
 class MyApp(wx.App):
     def OnInit(self):
