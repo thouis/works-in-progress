@@ -20,6 +20,6 @@ print max(abs(pos1 - np.round(pos1))), max(abs(pos2 - np.round(pos2))), max(abs(
 print max(abs(test13 - np.round(test13)))
 
 writer = csv.writer(open('nephrine_fracs.csv', 'w'))
-for pos, ct in zip([pos1, pos2, pos3], [ct1, ct2, ct3]):
+for batch, pos, ct in zip(range(3), [pos1, pos2, pos3], [ct1, ct2, ct3]):
     for p, ct, pl, w, t in zip(pos, ct, plate_ids, wells, treatments):
-        writer.writerow((int(p), int(ct), 1, pl, w[0], w[1:], t))
+        writer.writerow((int(p), int(ct), batch + 1, pl, w[0], w[1:], t))
