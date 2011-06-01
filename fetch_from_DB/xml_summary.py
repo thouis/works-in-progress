@@ -6,6 +6,7 @@ import traceback
 import xml.parsers.expat
 import treeview
 
+from lookup_from_db import lookup_treatment
 
 class DirPanel(wx.Panel):
     def __init__(self, parent, ID, labelstr, flags):
@@ -97,22 +98,29 @@ class MyFrame(wx.Frame):
        self.subdirs = subdirs = treeview.DirTree(self, '.')
        substring_label = wx.StaticText(self, -1, 'Common string in .XML file names: ')
        self.substring = substring = wx.TextCtrl(self, -1)
+       extract_label = wx.StaticText(self, -1, 'Extract genes/chemicals from DB?')
+       self.extract_from_DB = wx.Choice(self, -1, choices=['No', 'Genes', 'Chemicals'])
        self.go_button = go_button = wx.Button(self, -1, 'Choose output file...')
 
        substring_box = wx.BoxSizer(wx.HORIZONTAL)
-       substring_box.Add(substring_label, 0, wx.EXPAND)
+       substring_box.Add(substring_label, 0, wx.CENTER)
        substring_box.Add(substring, 1, wx.EXPAND)
 
+       extract_box = wx.BoxSizer(wx.HORIZONTAL)
+       extract_box.Add(extract_label, 0, wx.CENTER)
+       extract_box.Add(self.extract_from_DB, 1, wx.EXPAND)
+
        box = wx.BoxSizer(wx.VERTICAL)
-       box.Add(parent_dir, 0, wx.EXPAND)
-       box.Add(subdirs, 1, wx.EXPAND)
-       box.Add(substring_box, 0, wx.EXPAND)
-       box.Add((5,5))
-       box.Add(go_button, 0, wx.CENTER)
+       box.Add(parent_dir, 0, wx.EXPAND | wx.BOTTOM, 5)
+       box.Add(subdirs, 1, wx.EXPAND | wx.BOTTOM, 5)
+       box.Add(substring_box, 0, wx.EXPAND | wx.BOTTOM, 5)
+       box.Add(extract_box, 0, wx.CENTER | wx.BOTTOM, 5)
+       box.Add(go_button, 0, wx.CENTER | wx.BOTTOM, 5)
 
        bigbox = wx.BoxSizer(wx.VERTICAL)
        bigbox.Add(box, 1, wx.EXPAND | wx.ALL, 5)
 
+       self.extract_from_DB.Value = False
        go_button.Bind(wx.EVT_BUTTON, self.process_xml)
 
        self.SetSizer(bigbox)
@@ -183,7 +191,7 @@ class MyFrame(wx.Frame):
                if not kont:
                    raise StopProcessing
            try:
-               xmls_to_xls(self.parent_dir.dirname.Value, xmlfiles, outfile, callback)
+               xmls_to_xls(self.parent_dir.dirname.Value, xmlfiles, outfile, callback, lookup_treatment(self.extract_from_DB.StringSelection))
            except StopProcessing:
                pass
            progress.Destroy()
@@ -218,7 +226,7 @@ class MyFrame(wx.Frame):
 
 # XML parsing
 
-def xmls_to_xls(parent_dir, xmlfiles, outfile, callback):
+def xmls_to_xls(parent_dir, xmlfiles, outfile, callback, lookup_well_treatment):
     xmls_to_xls.active = False
     xmls_to_xls.rowidx = 1 # start at 1, go back and write header
     rowvals = {}
@@ -272,12 +280,16 @@ def xmls_to_xls(parent_dir, xmlfiles, outfile, callback):
             # force these to be first
             lookup_feature_col('Plate')
             lookup_feature_col('Well')
+            if lookup_treatment is not None:
+                lookup_feature_col('Treatment')
             rowvals['Plate'] = parse_plate(platedir)
             # prefer well row/column, but use name if they are not valid
             if int(wellrow) > 0 and int(wellcol) > 0:
                 rowvals['Well'] = '%s%02d'%('ABCDEFGHIJKLMNOP'[int(wellrow)-1], int(wellcol))
             else:
                 rowvals['Well'] = wellname
+            if lookup_well_treatment is not None:
+                rowvals['Treatment'] = lookup_well_treatment(platedir, wellrow, wellcol)
 
         def end_well():
             colvals = sorted([(lookup_feature_col(feature), rowvals.get(feature, '')) for feature in feature_to_col])
