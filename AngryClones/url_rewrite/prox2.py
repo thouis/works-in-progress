@@ -27,26 +27,27 @@ class InterceptingProxyClient(ProxyClient):
     def __init__(self, *args, **kwargs):
         ProxyClient.__init__(self, *args, **kwargs)
         self.replacing = None
+        self.rewriting = None
+        self._buf = None
         cache_path = cache_file(self.father.uri)
         replace_path = replace_file(self.father.uri)
         if cache_path and not os.path.exists(cache_path):
-            print "FETCHING", cache_path
             t = threading.Thread(target=lambda:urllib.urlretrieve(self.father.uri, cache_path))
             t.start()
         if replace_path:
-            print "replacing %s with %s" % (self.father.uri, replace_path)
             self.replacing = replace_path
+        elif 'json/Level' in self.father.uri and self.father.uri.endswith('.json'):
+            self.rewriting = True
+            self._buf = ''
 
     def handleHeader(self, key, value):
-        if key == "Content-Length" and self.replacing is not None:
-            pass
-        if key == "Content-Encoding" and value == 'gzip' and self.replacing is not None:
+        if key == "Content-Length" and (self.replacing or self.rewriting):
             pass
         else:
             ProxyClient.handleHeader(self, key, value)
 
     def handleEndHeaders(self):
-        if self.replacing is not None:
+        if self.replacing or self.rewriting:
             pass  # Need to calculate and send Content-Length first
         else:
             ProxyClient.handleEndHeaders(self)
@@ -54,6 +55,8 @@ class InterceptingProxyClient(ProxyClient):
     def handleResponsePart(self, buffer):
         if self.replacing is not None:
             pass
+        elif self.rewriting is not None:
+            self._buf += buffer
         else:
             ProxyClient.handleResponsePart(self, buffer)
 
@@ -62,8 +65,12 @@ class InterceptingProxyClient(ProxyClient):
             try:
                 buffer = open(self.replacing).read()
             except:
-                print "FAIL", self.replacing
                 buffer = ""
+            ProxyClient.handleHeader(self, "Content-Length", len(buffer))
+            ProxyClient.handleEndHeaders(self)
+            ProxyClient.handleResponsePart(self, buffer)
+        elif self.rewriting:
+            buffer = self._buf.replace('"id": "BIRD_RED"', '"id": "BIRD_BLACK"')
             ProxyClient.handleHeader(self, "Content-Length", len(buffer))
             ProxyClient.handleEndHeaders(self)
             ProxyClient.handleResponsePart(self, buffer)
@@ -75,6 +82,10 @@ class InterceptingProxyClientFactory(ProxyClientFactory):
 class InterceptingProxyRequest(ProxyRequest):
     protocols = {'http': InterceptingProxyClientFactory}
     ports = {"http" : 80}
+    def process(self):
+        self.requestHeaders.removeHeader('accept-encoding')
+        ProxyRequest.process(self)
+
 
 class InterceptingProxy(Proxy):
     requestFactory = InterceptingProxyRequest
