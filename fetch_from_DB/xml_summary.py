@@ -6,8 +6,6 @@ import traceback
 import xml.parsers.expat
 import treeview
 
-from lookup_from_db import lookup_treatment
-
 class DirPanel(wx.Panel):
     def __init__(self, parent, ID, labelstr, flags):
         wx.Panel.__init__(self, parent, ID)
@@ -191,7 +189,7 @@ class MyFrame(wx.Frame):
                if not kont:
                    raise StopProcessing
            try:
-               xmls_to_xls(self.parent_dir.dirname.Value, xmlfiles, outfile, callback, lookup_treatment(self.extract_from_DB.StringSelection))
+               xmls_to_xls(self.parent_dir.dirname.Value, xmlfiles, outfile, callback)
            except StopProcessing:
                pass
            progress.Destroy()
@@ -226,7 +224,7 @@ class MyFrame(wx.Frame):
 
 # XML parsing
 
-def xmls_to_xls(parent_dir, xmlfiles, outfile, callback, lookup_well_treatment):
+def xmls_to_xls(parent_dir, xmlfiles, outfile, callback):
     xmls_to_xls.active = False
     xmls_to_xls.rowidx = 1 # start at 1, go back and write header
     rowvals = {}
@@ -280,16 +278,12 @@ def xmls_to_xls(parent_dir, xmlfiles, outfile, callback, lookup_well_treatment):
             # force these to be first
             lookup_feature_col('Plate')
             lookup_feature_col('Well')
-            if lookup_treatment is not None:
-                lookup_feature_col('Treatment')
             rowvals['Plate'] = parse_plate(platedir)
             # prefer well row/column, but use name if they are not valid
             if int(wellrow) > 0 and int(wellcol) > 0:
                 rowvals['Well'] = '%s%02d'%('ABCDEFGHIJKLMNOP'[int(wellrow)-1], int(wellcol))
             else:
                 rowvals['Well'] = wellname
-            if lookup_well_treatment is not None:
-                rowvals['Treatment'] = lookup_well_treatment(platedir, wellrow, wellcol)
 
         def end_well():
             colvals = sorted([(lookup_feature_col(feature), rowvals.get(feature, '')) for feature in feature_to_col])
