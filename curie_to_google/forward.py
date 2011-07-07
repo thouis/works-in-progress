@@ -2,6 +2,7 @@ import getpass
 import imaplib
 import sys
 import time
+import traceback
 
 def cpimap(user1, host1, pass1, user2, host2, pass2):
     m1 = imaplib.IMAP4_SSL(host1, 993)
@@ -25,6 +26,13 @@ h2 = 'imap.gmail.com'
 u2 = 'thouis'
 pass2 = getpass.getpass('PW google: ')
 
-while True:
-    cpimap(u1, h1, pass1, u2, h2, pass2)
+fail_count = 0
+while fail_count < 10:
+    try:
+        cpimap(u1, h1, pass1, u2, h2, pass2)
+        fail_count = 0
+    except:
+        traceback.print_exc()
+        fail_count += 1
+        print fail_count, "FAILURES"
     time.sleep(300)
